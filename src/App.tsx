@@ -1,13 +1,12 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { getSession, login, logout } from './auth'
-import { evaluate, STRATEGIES, type Assessment, type PaperCandidate } from './checklists'
+import { evaluate, paperSize, PAPER_BANKROLL, STRATEGIES, UNIT_DOLLARS, type Assessment, type PaperCandidate } from './checklists'
 import NflScanner from './NflScanner'
 import './styles.css'
 
 type Outcome = 'pending' | 'win' | 'loss' | 'void'
-type Entry = { id: string; candidate: PaperCandidate; results: Assessment[]; outcome: Outcome }
+type Entry = { id: string; candidate: PaperCandidate; results: Assessment[]; outcome: Outcome; contracts?: number }
 const STORAGE_KEY = 'edgeboard-paper-v1'
-const CONTRACTS = 10
 
 function loadEntries(): Entry[] {
   try {
@@ -47,8 +46,10 @@ function Dashboard({ onLogout }: { onLogout: () => Promise<void> }) {
       consensusProbability: optionalPercent('consensus'), consensusSource: read('consensusSource'),
       crowdMoneyPercent: optionalShare('crowd'), crowdSource: read('crowdSource'),
       rulesChecked: data.has('rules'), newsChecked: data.has('news'), depthChecked: data.has('depth'),
+      units: Number(read('units')), highConfidence: data.has('highConfidence'), confidenceRationale: read('confidenceRationale'),
     }
-    const next = [{ id: crypto.randomUUID(), candidate, results: evaluate(candidate), outcome: 'pending' as Outcome }, ...entries]
+    const contracts = paperSize(candidate.units ?? 1, candidate.allInCost).contracts
+    const next = [{ id: crypto.randomUUID(), candidate, results: evaluate(candidate), outcome: 'pending' as Outcome, contracts }, ...entries]
     save(next)
     if (localStorage.getItem(STORAGE_KEY) === JSON.stringify(next)) form.reset()
   }
@@ -69,26 +70,26 @@ function Dashboard({ onLogout }: { onLogout: () => Promise<void> }) {
           <h1>Three filters.<br /><em>One honest record.</em></h1>
           <p className="lede">Run the same candidate through three frozen checklists. Record every rejection and settlement. These are hypotheses, not proven betting edges.</p>
         </div>
-        <aside className="risk-card"><span>FIXED PAPER SIZE</span><strong>{CONTRACTS} contracts</strong><div>Read-only market scan; paper decisions remain manual. Local browser log; clearing its data erases it.</div></aside>
+        <aside className="risk-card"><span>PAPER BANKROLL</span><strong>${PAPER_BANKROLL.toLocaleString()}</strong><div>1 unit = ${UNIT_DOLLARS} · 0.00–2.00 units per candidate · $50 maximum intended stake. Paper-only, browser-local ledger.</div></aside>
       </section>
       <NflScanner />
       <section className="checklist-grid" aria-label="Paper strategies">
         {STRATEGIES.map((strategy) => {
           const picks = entries.filter((entry) => entry.results.some((result) => result.id === strategy.id && result.status === 'PAPER'))
           const settled = picks.filter((entry) => entry.outcome === 'win' || entry.outcome === 'loss')
-          const profit = settled.reduce((sum, entry) => sum + CONTRACTS * (entry.outcome === 'win' ? 1 - entry.candidate.allInCost : -entry.candidate.allInCost), 0)
-          const stake = settled.reduce((sum, entry) => sum + CONTRACTS * entry.candidate.allInCost, 0)
+          const profit = settled.reduce((sum, entry) => sum + (entry.contracts ?? 10) * (entry.outcome === 'win' ? 1 - entry.candidate.allInCost : -entry.candidate.allInCost), 0)
+          const stake = settled.reduce((sum, entry) => sum + (entry.contracts ?? 10) * entry.candidate.allInCost, 0)
           return <article className="strategy" key={strategy.id}>
             <h2>{strategy.name}</h2><p>{strategy.rule}</p>
             <div className="strategy-stats"><span>{picks.length} paper picks</span><span>{settled.length} settled</span></div>
             <strong>{settled.length ? `${profit >= 0 ? '+' : ''}$${profit.toFixed(2)}` : '—'}</strong>
-            <small>{settled.length ? `Net simulation · ${(profit / stake * 100).toFixed(1)}% ROI` : 'No settled picks · no performance claim'}</small>
+            <small>{settled.length ? `Bankroll $${(PAPER_BANKROLL + profit).toFixed(2)} · ${(profit / stake * 100).toFixed(1)}% ROI` : 'No settled picks · no performance claim'}</small>
           </article>
         })}
       </section>
       <section className="board" aria-labelledby="entry-heading">
         <div className="board-heading"><div><p className="eyebrow">01 / CAPTURE</p><h2 id="entry-heading">Log a candidate</h2></div></div>
-        <p className="help">Enter the exact contract, quote observation time, and executable all-in per-contract cost (price + applicable fees/depth). Type your own model estimate. A separate source is required for B; a sourced dollar split for this exact side is required for C. Unknown inputs reject those strategies, never default to zero.</p>
+        <p className="help">Enter the exact contract, quote time and executable all-in cost (including fees/depth). Allocate 0.00–2.00 units: 1 unit = $25 intended risk, with whole contracts rounded down. Standard payout floor is 1.7×; only a documented 2-unit high-confidence play may use 1.65×. Probability-edge, rules, news and depth gates still apply. Type your own independent estimate; unknown inputs reject, never default to zero.</p>
         <form onSubmit={logSnapshot} className="entry-form">
           <label>Matchup<input name="matchup" required placeholder="Team A @ Team B" /></label>
           <label>Exact contract<input name="contract" required placeholder="Kalshi ticker / resolution" /></label>
@@ -96,6 +97,8 @@ function Dashboard({ onLogout }: { onLogout: () => Promise<void> }) {
           <label>Quote observed at<input name="quoteTime" type="datetime-local" required /></label>
           <label>All-in cost per contract (¢)<input name="cost" type="number" min="0.01" max="99.99" step="0.01" required /></label>
           <label>Model win probability (%)<input name="model" type="number" min="0.01" max="99.99" step="0.01" required /></label>
+          <label>Units (0.00–2.00)<input name="units" type="number" min="0" max="2" step="0.01" defaultValue="1.00" required /></label>
+          <label>Conviction rationale (required at 2 units)<input name="confidenceRationale" placeholder="Specific independent evidence + timestamp" /></label>
           <label>Independent probability (%)<input name="consensus" type="number" min="0.01" max="99.99" step="0.01" /></label>
           <label>Independent source<input name="consensusSource" placeholder="Source + quote time" /></label>
           <label>Dollar share on our side (%)<input name="crowd" type="number" min="0" max="100" step="0.01" /></label>
@@ -104,6 +107,7 @@ function Dashboard({ onLogout }: { onLogout: () => Promise<void> }) {
             <label><input type="checkbox" name="rules" /> Contract rules checked</label>
             <label><input type="checkbox" name="news" /> News checked</label>
             <label><input type="checkbox" name="depth" /> Depth and fees checked</label>
+            <label><input type="checkbox" name="highConfidence" /> Documented high-confidence 2-unit play</label>
           </div>
           <button className="primary" type="submit">Log paper snapshot</button>
           {notice && <p role="alert">{notice}</p>}
@@ -115,7 +119,7 @@ function Dashboard({ onLogout }: { onLogout: () => Promise<void> }) {
         <div className="table-wrap"><table><thead><tr><th>SNAPSHOT / CONTRACT</th><th>COST / MODEL / PAYOUT</th><th>A · VALUE</th><th>B · CONSENSUS</th><th>C · CROWD</th><th>OUTCOME</th></tr></thead><tbody>
           {entries.map((entry) => <tr key={entry.id}>
             <td><strong>{entry.candidate.matchup}</strong><span>{entry.candidate.contract} · {entry.candidate.side}</span><span>{new Date(entry.candidate.observedAt).toLocaleString()}</span></td>
-            <td>{(entry.candidate.allInCost * 100).toFixed(2)}¢ / {(entry.candidate.modelProbability * 100).toFixed(1)}% / {entry.results[0]?.payoutMultiple?.toFixed(2) ?? '—'}×</td>
+            <td>{(entry.candidate.allInCost * 100).toFixed(2)}¢ / {(entry.candidate.modelProbability * 100).toFixed(1)}% / {entry.results[0]?.payoutMultiple?.toFixed(2) ?? '—'}×<span>{entry.candidate.units === undefined ? 'Legacy · 10 contracts' : `${entry.candidate.units.toFixed(2)} units · ${entry.contracts ?? 0} contracts · $${((entry.contracts ?? 0) * entry.candidate.allInCost).toFixed(2)} staked`}</span></td>
             {STRATEGIES.map((strategy) => { const result = entry.results.find((item) => item.id === strategy.id); return <td key={strategy.id}><b className={result?.status === 'PAPER' ? 'positive' : 'muted'}>{result?.status ?? '—'}</b><span className="reasons">{result?.reasons.join('; ') || 'All checks passed'}</span></td> })}
             <td><strong>{entry.outcome.toUpperCase()}</strong><div className="outcome-actions">{(['win', 'loss', 'void'] as const).map((outcome) => <button type="button" key={outcome} onClick={() => settle(entry.id, outcome)} aria-label={`Mark ${outcome}`}>{outcome}</button>)}</div></td>
           </tr>)}

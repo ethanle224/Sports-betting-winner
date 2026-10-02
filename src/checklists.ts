@@ -12,6 +12,19 @@ export type PaperCandidate = {
   rulesChecked: boolean
   newsChecked: boolean
   depthChecked: boolean
+  units?: number
+  highConfidence?: boolean
+  confidenceRationale?: string
+}
+
+export const PAPER_BANKROLL = 1000
+export const UNIT_DOLLARS = 25
+
+export function paperSize(units: number, allInCost: number) {
+  const target = Math.round(units * UNIT_DOLLARS * 100) / 100
+  const contracts = Number.isFinite(target) && target > 0 && Number.isFinite(allInCost) && allInCost > 0
+    ? Math.floor((target + 1e-9) / allInCost) : 0
+  return { contracts, exposure: Math.round(contracts * allInCost * 10000) / 10000, target }
 }
 
 export type StrategyId = 'value' | 'consensus' | 'crowd'
@@ -34,6 +47,7 @@ const validProbability = (value: number) => Number.isFinite(value) && value > 0 
 export function evaluate(candidate: PaperCandidate, now = Date.now()): Assessment[] {
   const common: string[] = []
   const { allInCost: cost, modelProbability: model } = candidate
+  const units = candidate.units ?? 1
   const time = Date.parse(candidate.observedAt)
   if (!candidate.matchup.trim() || !candidate.contract.trim() || !candidate.side.trim()) common.push('Matchup, exact contract and side are required')
   if (!Number.isFinite(time) || time > now || now - time > 30 * 60_000) common.push('Snapshot is stale or in the future')
@@ -42,7 +56,12 @@ export function evaluate(candidate: PaperCandidate, now = Date.now()): Assessmen
   if (!candidate.depthChecked) common.push('Executable depth and fees not checked')
   if (!validProbability(cost)) common.push('All-in cost must be between $0 and $1')
   if (!validProbability(model)) common.push('Model probability must be between 0% and 100%')
-  if (validProbability(cost) && 1 / cost < 1.7) common.push('Winning payout is below 1.7× all-in cost')
+  if (!Number.isFinite(units) || units < 0 || units > 2 || Math.abs(units * 100 - Math.round(units * 100)) > 1e-8) common.push('Units must be 0.00–2.00 in 0.01 increments')
+  else if (units === 0) common.push('Zero units means no paper bet')
+  else if (validProbability(cost) && paperSize(units, cost).contracts === 0) common.push('Unit allocation cannot buy one whole contract')
+  if (units === 2 && (!candidate.highConfidence || !candidate.confidenceRationale?.trim())) common.push('2-unit play needs a documented high-confidence case')
+  const minimumPayout = units === 2 && candidate.highConfidence && candidate.confidenceRationale?.trim() ? 1.65 : 1.7
+  if (validProbability(cost) && 1 / cost + 1e-9 < minimumPayout) common.push(`Winning payout is below ${minimumPayout.toFixed(2).replace(/0$/, '')}× all-in cost`)
 
   return STRATEGIES.map(({ id, name }) => {
     const reasons = [...common]

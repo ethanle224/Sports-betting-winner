@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { evaluate, type PaperCandidate } from './checklists'
+import { evaluate, paperSize, type PaperCandidate } from './checklists'
 
 const candidate: PaperCandidate = {
   matchup: 'Example vs Example', contract: 'GAME-WINNER', side: 'YES',
@@ -46,5 +46,28 @@ describe('paper checklist evaluations', () => {
   it('separates a small model edge from a consensus-supported opportunity', () => {
     const results = evaluate({ ...candidate, modelProbability: 0.58, consensusProbability: 0.62 }, now)
     expect(results.map((result) => result.status)).toEqual(['REJECT', 'REJECT', 'REJECT'])
+  })
+
+  it('sizes whole contracts from a $25 unit without exceeding the intended stake', () => {
+    expect(paperSize(0.5, 0.55)).toEqual({ contracts: 22, exposure: 12.1, target: 12.5 })
+    expect(paperSize(2, 0.6)).toEqual({ contracts: 83, exposure: 49.8, target: 50 })
+    expect(paperSize(0, 0.55)).toEqual({ contracts: 0, exposure: 0, target: 0 })
+  })
+
+  it('allows the 1.65× floor only at exactly 2 units with a documented conviction case', () => {
+    const high = { ...candidate, units: 2, allInCost: 0.6, modelProbability: 0.68,
+      consensusProbability: 0.68, highConfidence: true, confidenceRationale: 'Independent injury-adjusted estimate, source and timestamp' }
+    expect(evaluate(high, now).map((r) => r.status)).toEqual(['PAPER', 'PAPER', 'PAPER'])
+    expect(evaluate({ ...high, units: 1.99 }, now).every((r) => r.status === 'REJECT')).toBe(true)
+    expect(evaluate({ ...high, highConfidence: false }, now)[0].reasons).toContain('2-unit play needs a documented high-confidence case')
+    expect(evaluate({ ...high, confidenceRationale: '' }, now)[0].status).toBe('REJECT')
+    expect(evaluate({ ...high, allInCost: 0.61 }, now)[0].status).toBe('REJECT')
+  })
+
+  it('rejects oversize, fractional-cent units, zero allocation and insufficient contract budget', () => {
+    for (const units of [-0.01, 0, 2.01, 0.001]) {
+      expect(evaluate({ ...candidate, units }, now).every((r) => r.status === 'REJECT')).toBe(true)
+    }
+    expect(evaluate({ ...candidate, units: 0.01 }, now)[0].reasons).toContain('Unit allocation cannot buy one whole contract')
   })
 })

@@ -8,7 +8,14 @@ A read-only, on-demand NFL market scanner and manual paper-trading ledger for Ka
 
 Enter **every candidate**, including rejected ones, before the event. All three strategies evaluate the *same snapshot* and freeze their decisions at entry. A candidate can qualify for more than one strategy; their results are therefore correlated, not independent bets.
 
-Shared gates: exact contract/side, quote observed within 30 minutes (no future timestamps), manual rules/news/depth-and-fee checks, valid inputs, and winning payout of at least **1.7× all-in cost**. This is a payout-on-win target, not an expected ROI target. The quote time is the time the price was actually observed, not when you enter it. Costs must include price, fees and intended-size execution; there is no automatic quote, fee or fill verification.
+Shared gates: exact contract/side, quote observed within 30 minutes (no future timestamps), manual rules/news/depth-and-fee checks, valid inputs, and winning payout of at least **1.7× all-in cost** for ordinary plays. This is a payout-on-win target, not an expected ROI target. The quote time is the time the price was actually observed, not when you enter it. Costs must include price, fees and intended-size execution; there is no automatic quote, fee or fill verification.
+
+### Paper allocation (version 2)
+
+- Starting bankroll **$1,000 per strategy**; **1 unit = $25** intended paper stake, with per-candidate allocation 0.00–2.00 units in 0.01 increments. Zero is an abstention, not a funded pick. Maximum intended stake is **$50** per candidate. Units measure dollars risked, **not** a count of contracts.
+- Only **exactly 2.00 units** with an explicit high-confidence flag and recorded, specific rationale may use the **1.65×** all-in winning-payout floor. Other unit sizes retain 1.7×. Conviction never waives the probability-edge, quote freshness, depth, news or rule gates; these are experimental rules, not a proven sizing model.
+- Freeze whole contracts as `floor(intended stake / entered all-in cost per contract)` when the candidate is logged. The actual paper stake can be slightly below the target. Simulated P&L uses the frozen contracts and entered cost, with $1 payout for a normal win. A tiny allocation that buys no whole contract is rejected. The 10-contract scanner quote is **not** sufficient evidence of executable depth for a larger unit-sized entry: inspect the orderbook at the intended quantity before checking depth/fees.
+- Existing browser entries without unit sizing retain their original **10-contract** accounting. Do not retroactively apply the new rules or sizes to them. Each checklist is simulated independently when one candidate passes more than one. There is currently no shared cross-strategy exposure cap or verified fill feed.
 
 - **A · Value baseline:** manually estimated win probability exceeds all-in cost by at least 5 percentage points.
 - **B · Independent consensus:** manually estimated probability exceeds cost by 4pp, *and* separately sourced independent probability exceeds cost by 6pp. Missing source rejects B.
@@ -16,7 +23,7 @@ Shared gates: exact contract/side, quote observed within 30 minutes (no future t
 
 These thresholds are **unvalidated experimental settings**, not discovered edges. Maintain the rules unchanged during a forward-testing block; version any later change instead of retroactively re-scoring old decisions. Enter the source and observation time for independent probabilities and splits. If a source is stale, absent, or not the same market, leave it blank and let the dependent strategy reject.
 
-Paper P&L assumes exactly 10 contracts bought at the entered all-in cost, with $1 payout per winning contract. Mark unusual/partial/tied settlements `void` pending verification. Rejected candidates never contribute to P&L. Compare each strategy on settled sample size, net ROI, drawdown and forecast calibration after a sizable forward sample; a tiny positive ROI is not evidence of an edge. Never use this local prototype to place real orders.
+Mark unusual/partial/tied settlements `void` pending verification. Rejected candidates never contribute to P&L. Compare each strategy on settled sample size, net ROI, drawdown and forecast calibration after a sizable forward sample; a tiny positive ROI is not evidence of an edge. Never use this local prototype to place real orders.
 
 ## Daily NFL research scope
 

@@ -30,10 +30,17 @@ Every candidate needs:
 2. Quote observed within 30 minutes; no future timestamps.
 3. Rules, news/injuries, depth, and fee checks explicitly completed.
 4. Valid all-in cost and model probability.
-5. Winning payout of at least 1.7× all-in cost.
+5. Winning payout of at least 1.7× all-in cost; a documented exactly-2.00-unit conviction play may use 1.65× without waiving other gates.
 6. A paper entry before the event — including rejected candidates.
 
 A strategy can mark a candidate `PAPER` or `REJECT`. Shared candidates are correlated, not separate independent bets. These thresholds are experimental settings, not proven edges.
+
+### Unit allocation (experiment version 2)
+
+- Starting bankroll $1,000 for each independently compared strategy. 1 unit = $25 intended risk; 0.00–2.00 units per candidate in 0.01-unit steps. 0 units abstains; maximum intended risk per entry is $50.
+- A 2.00-unit entry requires the explicit high-confidence flag and written supporting rationale to qualify; its minimum winning payout is 1.65× all-in cost. All other sizes require at least 1.7×. Edge, rules, news, depth and quote-time checks remain mandatory.
+- Freeze whole contracts by rounding down intended dollar stake divided by entered fee-aware per-contract cost. P&L uses frozen quantity, not the nominal unit target. Older saved entries keep their original 10-contract P&L. The 10-contract market scanner is not a depth check for unit-sized stakes.
+- This is manual experimental sizing, not an empirically calibrated confidence algorithm. No automated probabilities or paper picks are live yet.
 
 ## NFL research checklist
 

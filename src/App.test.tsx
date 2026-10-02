@@ -99,6 +99,39 @@ describe('Edgeboard dashboard', () => {
     expect(await screen.findByText('Saved match')).toBeInTheDocument()
   })
 
+  it('stakes half a unit, freezes 22 whole contracts and accounts for the real paper exposure', async () => {
+    render(<App />)
+    await screen.findByText('A · Value baseline')
+    fireEvent.change(screen.getByLabelText('Matchup'), { target: { value: 'Blue @ Red' } })
+    fireEvent.change(screen.getByLabelText('Exact contract'), { target: { value: 'TEST-GAME' } })
+    fireEvent.change(screen.getByLabelText('Side'), { target: { value: 'Red YES' } })
+    const quote = new Date(Date.now() - 60_000)
+    fireEvent.change(screen.getByLabelText('Quote observed at'), { target: { value: new Date(quote.getTime() - quote.getTimezoneOffset() * 60_000).toISOString().slice(0, 16) } })
+    fireEvent.change(screen.getByLabelText('All-in cost per contract (¢)'), { target: { value: '55' } })
+    fireEvent.change(screen.getByLabelText('Model win probability (%)'), { target: { value: '64' } })
+    fireEvent.change(screen.getByLabelText('Units (0.00–2.00)'), { target: { value: '0.50' } })
+    for (const label of ['Contract rules checked', 'News checked', 'Depth and fees checked']) fireEvent.click(screen.getByLabelText(label))
+    fireEvent.click(screen.getByRole('button', { name: 'Log paper snapshot' }))
+    const row = screen.getByRole('row', { name: /Blue @ Red/ })
+    expect(within(row).getByText(/0.50 units · 22 contracts · \$12.10 staked/)).toBeInTheDocument()
+    fireEvent.click(within(row).getByRole('button', { name: 'Mark win' }))
+    expect(screen.getByText('+$9.90')).toBeInTheDocument()
+    const saved = JSON.parse(localStorage.getItem('edgeboard-paper-v1') || '[]')
+    expect(saved[0].contracts).toBe(22)
+    expect(saved[0].candidate.units).toBe(0.5)
+  })
+
+  it('preserves ten-contract accounting for previously saved paper entries', async () => {
+    localStorage.setItem('edgeboard-paper-v1', JSON.stringify([{ id: 'old', outcome: 'win', candidate: {
+      matchup: 'Legacy match', contract: 'OLD-1', side: 'YES', observedAt: new Date().toISOString(),
+      allInCost: 0.55, modelProbability: 0.64, consensusProbability: null, consensusSource: '',
+      crowdMoneyPercent: null, crowdSource: '', rulesChecked: true, newsChecked: true, depthChecked: true,
+    }, results: [{ id: 'value', status: 'PAPER', reasons: [], payoutMultiple: 1 / 0.55 }] }]))
+    render(<App />)
+    expect(await screen.findByText('Legacy match')).toBeInTheDocument()
+    expect(screen.getByText('+$4.50')).toBeInTheDocument()
+  })
+
   it('logs out through the server and returns to the login screen', async () => {
     render(<App />)
     await screen.findByText('A · Value baseline')
