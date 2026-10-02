@@ -1,4 +1,5 @@
-import { useState, type FormEvent } from 'react'
+import { useEffect, useState, type FormEvent } from 'react'
+import { getSession, login, logout } from './auth'
 import { evaluate, STRATEGIES, type Assessment, type PaperCandidate } from './checklists'
 import './styles.css'
 
@@ -18,7 +19,7 @@ function loadEntries(): Entry[] {
   } catch { return [] }
 }
 
-function App() {
+function Dashboard({ onLogout }: { onLogout: () => Promise<void> }) {
   const [entries, setEntries] = useState<Entry[]>(loadEntries)
   const [notice, setNotice] = useState('')
 
@@ -59,7 +60,7 @@ function App() {
     <main className="shell">
       <header className="topbar">
         <a className="brand" href="#overview" aria-label="Edgeboard home"><span className="brand-mark">E</span><span>EDGEBOARD</span></a>
-        <div className="status"><span className="dot" /> PAPER MODE · MANUAL DATA · NO ORDERS</div>
+        <div className="topbar-actions"><div className="status"><span className="dot" /> PAPER MODE · MANUAL DATA · NO ORDERS</div><button className="logout" type="button" onClick={() => void onLogout()}>Log out</button></div>
       </header>
       <section className="hero" id="overview">
         <div>
@@ -123,6 +124,40 @@ function App() {
       <footer>MANUAL LOCAL PAPER LOG · NO KALSHI CONNECTION · NO REAL ORDERS · NOT FINANCIAL ADVICE</footer>
     </main>
   )
+}
+
+function App() {
+  const [session, setSession] = useState<{ authenticated: boolean; username?: string } | null>(null)
+  const [message, setMessage] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+
+  useEffect(() => {
+    void getSession().then(setSession)
+  }, [])
+
+  async function submitLogin(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const data = new FormData(event.currentTarget)
+    setSubmitting(true)
+    setMessage('')
+    const result = await login(String(data.get('username') || ''), String(data.get('password') || ''))
+    setSubmitting(false)
+    if (!result.ok) {
+      setMessage(result.message || 'Login failed.')
+      return
+    }
+    setSession({ authenticated: true, username: 'Admin' })
+  }
+
+  async function handleLogout() {
+    await logout()
+    setSession({ authenticated: false })
+  }
+
+  if (session === null) return <main className="auth-shell"><p>Checking session…</p></main>
+  if (session.authenticated) return <Dashboard onLogout={handleLogout} />
+
+  return <main className="auth-shell"><section className="login-card" aria-labelledby="login-title"><a className="brand" href="#login"><span className="brand-mark">E</span><span>EDGEBOARD</span></a><p className="eyebrow">ADMIN ACCESS</p><h1 id="login-title">Paper research, locked down.</h1><p>Sign in to access the local paper-trading ledger. No live orders are available.</p><form onSubmit={submitLogin}><label>Username<input name="username" autoComplete="username" defaultValue="Admin" required /></label><label>Password<input name="password" autoComplete="current-password" type="password" required /></label><button className="primary" disabled={submitting} type="submit">{submitting ? 'Signing in…' : 'Sign in'}</button>{message && <p role="alert">{message}</p>}</form></section></main>
 }
 
 export default App

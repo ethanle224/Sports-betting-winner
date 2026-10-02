@@ -48,3 +48,17 @@ h1 { font-size: clamp(48px, 6.5vw, 88px); line-height: .98; font-weight: 800; } 
 .outcome-actions button:hover { color: #86f7d4; border-color: #86f7d4; }
 @media (max-width: 800px) { .checklist-grid { grid-template-columns: 1fr; } .strategy p { min-height: 0; } .entry-form { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 550px) { .entry-form { grid-template-columns: 1fr; } }
+.topbar-actions { display: flex; align-items: center; gap: 14px; }
+.logout { background: transparent; border: 1px solid #355162; color: #c5d3d5; cursor: pointer; font: 500 10px 'DM Mono', monospace; letter-spacing: .08em; padding: 8px 10px; text-transform: uppercase; }
+.logout:hover { border-color: #86f7d4; color: #86f7d4; }
+.auth-shell { align-items: center; display: grid; justify-items: center; min-height: 100vh; padding: 24px; }
+.login-card { background: #0b1827dd; border: 1px solid #355162; max-width: 480px; padding: 36px; width: 100%; }
+.login-card .brand { margin-bottom: 48px; }
+.login-card h1 { font-size: clamp(35px, 7vw, 58px); line-height: 1.02; margin-bottom: 18px; }
+.login-card > p:not(.eyebrow) { color: #a4b5bc; line-height: 1.6; margin: 0 0 28px; }
+.login-card form { display: grid; gap: 16px; }
+.login-card label { color: #afc6ca; display: grid; font: 12px 'DM Mono', monospace; gap: 7px; }
+.login-card input { background: #102334; border: 1px solid #355162; color: #e7f4ee; padding: 12px; }
+.login-card input:focus { border-color: #86f7d4; outline: none; }
+.login-card [role='alert'] { color: #ffb998; font-size: 13px; margin: 0; }
+@media (max-width: 700px) { .topbar-actions { gap: 8px; } .topbar-actions .status { display: none; } }
