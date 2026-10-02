@@ -1,8 +1,8 @@
 # Edgeboard — Kalshi Sports Research
 
-A manual, paper-only checklist and candidate ledger for Kalshi sports-market research.
+A read-only, on-demand NFL market scanner and manual paper-trading ledger for Kalshi sports research.
 
-> **Manual data notice:** This local UI has no Kalshi connection or live feeds, cannot place orders, and makes no profitability claims. Input prices, probabilities and outcomes yourself. Data is saved to browser localStorage only; clearing the browser data deletes it. Nothing here is deployed automatically.
+> **Data notice:** The signed-in app has an on-demand, read-only Kalshi NFL discovery/quote API. The paper ledger still requires manual probability estimates, news/rule review and settlement; no automatic picks, scheduled scanner, live score feed, or real orders. Browser localStorage holds up to two daily scan snapshots and 20 inspected raw orderbooks; clearing browser data deletes them. Nothing here is deployed automatically.
 
 ## Experiment 01: three fixed checklists
 
@@ -26,7 +26,7 @@ The agent chooses candidate games and lines; the user does **not** need to suppl
 2. **Halftime:** Treat second-half markets as a **new decision**, using first-half score, injuries, possession/lineup context and current second-half order books. Capture this information only when known; never insert it into a pregame prediction or backdate a paper pick. If timely live data or a credible independent estimate is unavailable, abstain.
 3. **After settlement:** Resolve every logged candidate from official contract rules, track each strategy's settled net P&L and calibration, then classify losses as bad price, bad probability estimate, stale/incomplete information, rule mismatch, poor fill assumption, or ordinary variance. A loss by itself is **not** evidence that the model should change. Propose a new version only for a repeated, testable, preventable failure and evaluate it on later games without rewriting previous decisions.
 
-This is the intended workflow; the current UI is a **manual local ledger**, not an autonomous scanner, scheduler or live halftime feed. Do not label manual checkboxes as verified market data.
+The **Scan NFL day** control now discovers all nine series for one selected original game date, paginates every series, and fails closed on incomplete API coverage. It lists unavailable families with zero counts rather than silently omitting them. Event-ticker date is the **originally scheduled** date, not confirmed kickoff time; a rescheduled game needs separate verification. Select a contract to inspect an orderbook: 10-contract executable bid-complement depth for YES/NO plus a *provisional* general taker-fee estimate (series-specific fees may differ). Half-time listings are visible for planning but must be scanned again at halftime; no score or injury feed is connected. The UI does not score a contract as a paper pick from Kalshi's own price. The manual checkboxes are not verified market data. The API is session-protected and read-only; Vite's standalone dev server does not run the `/api` functions (use a Vercel-compatible local runtime or deployed environment for the UI scan).
 
 ## Local development
 

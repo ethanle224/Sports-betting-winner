@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { getSession, login, logout } from './auth'
 import { evaluate, STRATEGIES, type Assessment, type PaperCandidate } from './checklists'
+import NflScanner from './NflScanner'
 import './styles.css'
 
 type Outcome = 'pending' | 'win' | 'loss' | 'void'
@@ -60,7 +61,7 @@ function Dashboard({ onLogout }: { onLogout: () => Promise<void> }) {
     <main className="shell">
       <header className="topbar">
         <a className="brand" href="#overview" aria-label="Edgeboard home"><span className="brand-mark">E</span><span>EDGEBOARD</span></a>
-        <div className="topbar-actions"><div className="status"><span className="dot" /> PAPER MODE · MANUAL DATA · NO ORDERS</div><button className="logout" type="button" onClick={() => void onLogout()}>Log out</button></div>
+        <div className="topbar-actions"><div className="status"><span className="dot" /> PAPER MODE · PUBLIC MARKET SCAN · NO ORDERS</div><button className="logout" type="button" onClick={() => void onLogout()}>Log out</button></div>
       </header>
       <section className="hero" id="overview">
         <div>
@@ -68,8 +69,9 @@ function Dashboard({ onLogout }: { onLogout: () => Promise<void> }) {
           <h1>Three filters.<br /><em>One honest record.</em></h1>
           <p className="lede">Run the same candidate through three frozen checklists. Record every rejection and settlement. These are hypotheses, not proven betting edges.</p>
         </div>
-        <aside className="risk-card"><span>FIXED PAPER SIZE</span><strong>{CONTRACTS} contracts</strong><div>Manual snapshots only. Local to this browser; clearing its data erases the log. No live market connection.</div></aside>
+        <aside className="risk-card"><span>FIXED PAPER SIZE</span><strong>{CONTRACTS} contracts</strong><div>Read-only market scan; paper decisions remain manual. Local browser log; clearing its data erases it.</div></aside>
       </section>
+      <NflScanner />
       <section className="checklist-grid" aria-label="Paper strategies">
         {STRATEGIES.map((strategy) => {
           const picks = entries.filter((entry) => entry.results.some((result) => result.id === strategy.id && result.status === 'PAPER'))
@@ -121,7 +123,7 @@ function Dashboard({ onLogout }: { onLogout: () => Promise<void> }) {
         </tbody></table></div>
         <p className="help">{entries.filter((entry) => entry.outcome === 'win' || entry.outcome === 'loss').length} settled snapshots · {entries.reduce((total, entry) => total + (entry.outcome === 'win' || entry.outcome === 'loss' ? entry.results.filter((result) => result.status === 'PAPER').length : 0), 0)} eligible strategies settled. Not independent bets when strategies agree on a candidate.</p>
       </section>
-      <footer>MANUAL LOCAL PAPER LOG · NO KALSHI CONNECTION · NO REAL ORDERS · NOT FINANCIAL ADVICE</footer>
+      <footer>READ-ONLY KALSHI SCAN · MANUAL PAPER PICKS · NO REAL ORDERS · NOT FINANCIAL ADVICE</footer>
     </main>
   )
 }

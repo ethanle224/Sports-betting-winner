@@ -48,6 +48,23 @@ h1 { font-size: clamp(48px, 6.5vw, 88px); line-height: .98; font-weight: 800; } 
 .outcome-actions button:hover { color: #86f7d4; border-color: #86f7d4; }
 @media (max-width: 800px) { .checklist-grid { grid-template-columns: 1fr; } .strategy p { min-height: 0; } .entry-form { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 550px) { .entry-form { grid-template-columns: 1fr; } }
+.scan-controls { display: flex; align-items: end; flex-wrap: wrap; gap: 12px; margin: 22px 0; }
+.scan-controls label { display: grid; gap: 7px; color: #a4b5bc; font: 12px 'DM Mono', monospace; }
+.scan-controls input { background: #102334; color: #e7f4ee; border: 1px solid #355162; color-scheme: dark; padding: 10px; }
+.series-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 20px 0; }
+.series-grid span { border: 1px solid #29404d; padding: 10px; font: 11px 'DM Mono', monospace; color: #b7c6c8; }
+.series-grid b { color: #86f7d4; float: right; }
+.scan-event { border-bottom: 1px solid #29404d; padding: 12px 0; color: #d0dede; }
+.scan-event > summary { cursor: pointer; font-weight: 700; }
+.scan-market-list { max-height: 520px; overflow-y: auto; margin-top: 10px; }
+.scan-market-list article { display: flex; justify-content: space-between; align-items: start; gap: 18px; border-top: 1px solid #253b49; padding: 12px 4px; }
+.scan-market-list small { display: block; color: #8399a0; margin-top: 4px; overflow-wrap: anywhere; }
+.scan-market-list button { flex: none; background: transparent; border: 1px solid #355162; color: #86f7d4; padding: 7px; cursor: pointer; }
+.scan-market-list details { max-width: 800px; margin-top: 8px; white-space: pre-wrap; color: #a4b5bc; }
+.scan-market-list details summary { cursor: pointer; }
+.quote-panel { border: 1px solid #86f7d4; margin: 16px 0; padding: 16px; color: #d0dede; overflow-wrap: anywhere; }
+.board [role='alert'] { color: #ffb998; }
+@media (max-width: 700px) { .series-grid { grid-template-columns: 1fr; } .scan-market-list article { flex-direction: column; } }
 .topbar-actions { display: flex; align-items: center; gap: 14px; }
 .logout { background: transparent; border: 1px solid #355162; color: #c5d3d5; cursor: pointer; font: 500 10px 'DM Mono', monospace; letter-spacing: .08em; padding: 8px 10px; text-transform: uppercase; }
 .logout:hover { border-color: #86f7d4; color: #86f7d4; }

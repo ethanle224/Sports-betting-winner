@@ -25,6 +25,44 @@ describe('Edgeboard dashboard', () => {
     expect(screen.getByText('No candidates logged yet.')).toBeInTheDocument()
   })
 
+  it('scans an NFL day across nine series without inventing a pick', async () => {
+    const kinds = ['Game winner', 'Game spread', 'Game total', 'First-half winner', 'First-half spread', 'First-half total', 'Second-half winner', 'Second-half spread', 'Second-half total']
+    const payload = { date: '2026-10-04', collectedAt: '2026-10-04T10:00:00Z', coverage: { complete: true, count: 1 },
+      series: kinds.map((kind) => ({ ticker: kind.replaceAll(' ', ''), kind, phase: kind.startsWith('Second') ? 'halftime' : 'pregame', count: kind === 'Game winner' ? 1 : 0 })),
+      markets: [{ series: 'KXNFLGAME', kind: 'Game winner', phase: 'pregame', gameDate: '2026-10-04', eventTicker: 'KXNFLGAME-26OCT04INDWAS', ticker: 'KXNFLGAME-26OCT04INDWAS-IND', title: 'Indianapolis wins', rules: 'Tie pays $0.50', indicativeAsk: 0.55, indicativeSize: 20 }] }
+    const fetcher = vi.spyOn(globalThis, 'fetch').mockResolvedValue({ ok: true, json: async () => payload } as Response)
+    render(<App />)
+    await screen.findByText('A · Value baseline')
+    fireEvent.change(screen.getByLabelText('NFL game date'), { target: { value: '2026-10-04' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Scan NFL day' }))
+    expect(await screen.findByText(/1 listed contracts/)).toBeInTheDocument()
+    fireEvent.click(screen.getByText(/26OCT04INDWAS · 1 contracts/))
+    expect(screen.getByText(/Game winner: Indianapolis wins/)).toBeInTheDocument()
+    expect(screen.getByText('Second-half total')).toBeInTheDocument()
+    expect(screen.getByText('No candidates logged yet.')).toBeInTheDocument()
+    expect(fetcher).toHaveBeenCalledWith('/api/nfl-scan?date=2026-10-04', expect.objectContaining({ credentials: 'same-origin' }))
+    expect(JSON.parse(localStorage.getItem('edgeboard-nfl-scan-v1') || '[]')).toHaveLength(1)
+    fetcher.mockRestore()
+  })
+
+  it('records the observed raw orderbook when inspecting a contract', async () => {
+    const payload = { date: '2026-10-04', collectedAt: '2026-10-04T10:00:00Z', coverage: { complete: true, count: 1 },
+      series: Array.from({ length: 9 }, (_, n) => ({ ticker: `S${n}`, kind: `Market ${n}`, phase: 'pregame', count: n === 0 ? 1 : 0 })),
+      markets: [{ series: 'KXNFLGAME', kind: 'Game winner', phase: 'pregame', gameDate: '2026-10-04', eventTicker: 'KXNFLGAME-26OCT04INDWAS', ticker: 'KXNFLGAME-26OCT04INDWAS-IND', title: 'Indianapolis wins', rules: 'Game win', indicativeAsk: 0.55, indicativeSize: 20 }] }
+    const book = { ticker: payload.markets[0].ticker, observedAt: '2026-10-04T10:01:00Z', source: 'Kalshi', raw: { orderbook_fp: { no_dollars: [['0.45', '10.00']] } }, yes: { price: 0.55, estimatedAllIn: 0.57, estimatedFee: 0.2 }, no: null }
+    const fetcher = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => ({ ok: true, json: async () => String(input).includes('ticker=') ? book : payload }) as Response)
+    render(<App />)
+    await screen.findByText('A · Value baseline')
+    fireEvent.change(screen.getByLabelText('NFL game date'), { target: { value: '2026-10-04' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Scan NFL day' }))
+    await screen.findByText(/1 listed contracts/)
+    fireEvent.click(screen.getByText(/26OCT04INDWAS · 1 contracts/))
+    fireEvent.click(screen.getByRole('button', { name: 'Inspect 10-contract book' }))
+    expect(await screen.findByText(/57.00¢ estimated all-in/)).toBeInTheDocument()
+    expect(JSON.parse(localStorage.getItem('edgeboard-nfl-quotes-v1') || '[]')[0].raw).toEqual(book.raw)
+    fetcher.mockRestore()
+  })
+
   it('records one snapshot across all strategies and settles without counting rejected picks', async () => {
     render(<App />)
     await screen.findByText('A · Value baseline')
