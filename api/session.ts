@@ -1,4 +1,4 @@
-import { verifySessionToken } from './auth-core'
+import { verifySessionToken } from './auth-core.js'
 
 type Request = { headers?: { cookie?: string }; method?: string }
 type Response = { setHeader: (name: string, value: string) => void; status: (code: number) => { json: (body: unknown) => void } }

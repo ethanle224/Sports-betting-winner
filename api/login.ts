@@ -1,5 +1,5 @@
 import { timingSafeEqual } from 'node:crypto'
-import { createSessionToken, sessionMaxAgeSeconds } from './auth-core'
+import { createSessionToken, sessionMaxAgeSeconds } from './auth-core.js'
 
 type Request = { body?: unknown; method?: string }
 type Response = { end: () => void; setHeader: (name: string, value: string) => void; status: (code: number) => { json: (body: unknown) => void } }
