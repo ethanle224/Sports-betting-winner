@@ -9,7 +9,7 @@ Its job is to record the same pre-event market snapshot through fixed checklists
 ## Current product boundary
 
 - Manual, browser-local paper ledger.
-- No Kalshi API connection or live feed in the deployed UI.
+- Signed-in, read-only public Kalshi market and orderbook API; no live score feed. The new pregame forecast layer is local until separately deployed.
 - No account access, real orders, account balance, or automatic settlement.
 - Browser `localStorage` retains entries locally; clearing browser data removes them.
 - The GitHub/Vercel UI must not contain passwords, private keys, API keys, or other secret values.
@@ -39,8 +39,10 @@ A strategy can mark a candidate `PAPER` or `REJECT`. Shared candidates are corre
 
 - Starting bankroll $1,000 for each independently compared strategy. 1 unit = $25 intended risk; 0.00–2.00 units per candidate in 0.01-unit steps. 0 units abstains; maximum intended risk per entry is $50.
 - A 2.00-unit entry requires the explicit high-confidence flag and written supporting rationale to qualify; its minimum winning payout is 1.65× all-in cost. All other sizes require at least 1.7×. Edge, rules, news, depth and quote-time checks remain mandatory.
-- Freeze whole contracts by rounding down intended dollar stake divided by entered fee-aware per-contract cost. P&L uses frozen quantity, not the nominal unit target. Older saved entries keep their original 10-contract P&L. The 10-contract market scanner is not a depth check for unit-sized stakes.
-- This is manual experimental sizing, not an empirically calibrated confidence algorithm. No automated probabilities or paper picks are live yet.
+- Freeze whole contracts by rounding down intended dollar stake divided by entered fee-aware per-contract cost. P&L uses frozen quantity, not the nominal unit target. Older saved entries keep their original 10-contract P&L. Inspect depth at the proposed whole-share quantity, not an arbitrary sample size.
+- This is manual experimental sizing, not an empirically calibrated confidence algorithm. The local model calculates experimental full-game probabilities for exact listed lines; it does not choose or size paper picks.
+- New unit-sized paper entries require a named independent model source/method and calculation timestamp within 24 hours. These are manually entered audit evidence, not a verified model. The selected day's scanner inventories every open listed market across nine NFL families; its quote quantity is shares per selected contract, now adjustable from 1–1000 for on-demand orderbook inspection, not a limit on the number of games or markets found. Quote fees and ledger size are not yet automatically reconciled.
+- The read-only local scanner now models full-game winners, spreads and totals separately by listed threshold using prior completed-game points scored and allowed, with shrinkage and historical paired-score residuals. Unsupported/mismatched contracts and both half-game phases stay unrated. The score baseline omits first downs, efficiency, injury/weather and QB context. It beat a naive league baseline on 272 chronological 2025 games but **lost to archived bookmaker odds** (home-win Brier 0.2254 versus 0.2116). Therefore it is not a validated edge or automatic checklist approval. Details and source: `README.md`.
 
 ## NFL research checklist
 
@@ -49,6 +51,8 @@ For each day’s NFL slate, assess both sides where available for:
 - Full game: winner, spread, total
 - First half: winner, spread, total
 - Second half: winner, spread, total
+
+**Alternate-line screening:** Do not reduce each spread or total to one headline number. Enumerate every listed alternate spread and over/under threshold for the same game and phase, and treat each ticker, side, threshold, and settlement rule as a separate candidate. A safer line changes both the probability of winning and its purchase price; compare fee-aware executable cost, payout floor, and independently estimated probability for that **exact** threshold. Never transfer a forecast for over 45.5 to over 43.5, or a full-game forecast to a first-half/second-half line. Compare qualifying choices within a game and control their shared exposure rather than presenting correlated alternatives as independent bets. If a sportsbook allows a custom line that Kalshi does not list, it is not a Kalshi paper candidate.
 
 ### Pregame
 

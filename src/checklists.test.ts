@@ -56,7 +56,8 @@ describe('paper checklist evaluations', () => {
 
   it('allows the 1.65× floor only at exactly 2 units with a documented conviction case', () => {
     const high = { ...candidate, units: 2, allInCost: 0.6, modelProbability: 0.68,
-      consensusProbability: 0.68, highConfidence: true, confidenceRationale: 'Independent injury-adjusted estimate, source and timestamp' }
+      consensusProbability: 0.68, highConfidence: true, confidenceRationale: 'Independent injury-adjusted estimate, source and timestamp',
+      modelSource: 'Independent injury-adjusted forecast', modelObservedAt: candidate.observedAt }
     expect(evaluate(high, now).map((r) => r.status)).toEqual(['PAPER', 'PAPER', 'PAPER'])
     expect(evaluate({ ...high, units: 1.99 }, now).every((r) => r.status === 'REJECT')).toBe(true)
     expect(evaluate({ ...high, highConfidence: false }, now)[0].reasons).toContain('2-unit play needs a documented high-confidence case')
@@ -69,5 +70,12 @@ describe('paper checklist evaluations', () => {
       expect(evaluate({ ...candidate, units }, now).every((r) => r.status === 'REJECT')).toBe(true)
     }
     expect(evaluate({ ...candidate, units: 0.01 }, now)[0].reasons).toContain('Unit allocation cannot buy one whole contract')
+  })
+  it('rejects new picks without independently sourced, timely model evidence', () => {
+    const sized = { ...candidate, units: 1 }
+    expect(evaluate(sized, now)[0].reasons).toContain('Independent model source and calculation time required')
+    expect(evaluate({ ...sized, modelSource: 'Kalshi market price', modelObservedAt: candidate.observedAt }, now)[0].status).toBe('REJECT')
+    expect(evaluate({ ...sized, modelSource: 'Independent forecast', modelObservedAt: '2026-10-01T00:00:00Z' }, now)[0].status).toBe('REJECT')
+    expect(evaluate({ ...sized, modelSource: 'Independent forecast', modelObservedAt: candidate.observedAt }, now)[0].status).toBe('PAPER')
   })
 })

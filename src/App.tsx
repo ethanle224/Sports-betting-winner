@@ -47,6 +47,7 @@ function Dashboard({ onLogout }: { onLogout: () => Promise<void> }) {
       crowdMoneyPercent: optionalShare('crowd'), crowdSource: read('crowdSource'),
       rulesChecked: data.has('rules'), newsChecked: data.has('news'), depthChecked: data.has('depth'),
       units: Number(read('units')), highConfidence: data.has('highConfidence'), confidenceRationale: read('confidenceRationale'),
+      modelSource: read('modelSource'), modelObservedAt: read('modelTime') ? new Date(read('modelTime')).toISOString() : '',
     }
     const contracts = paperSize(candidate.units ?? 1, candidate.allInCost).contracts
     const next = [{ id: crypto.randomUUID(), candidate, results: evaluate(candidate), outcome: 'pending' as Outcome, contracts }, ...entries]
@@ -97,6 +98,8 @@ function Dashboard({ onLogout }: { onLogout: () => Promise<void> }) {
           <label>Quote observed at<input name="quoteTime" type="datetime-local" required /></label>
           <label>All-in cost per contract (¢)<input name="cost" type="number" min="0.01" max="99.99" step="0.01" required /></label>
           <label>Model win probability (%)<input name="model" type="number" min="0.01" max="99.99" step="0.01" required /></label>
+          <label>Independent model source / method<input name="modelSource" placeholder="Method, data source, version; not Kalshi price" /></label>
+          <label>Model calculated at<input name="modelTime" type="datetime-local" /></label>
           <label>Units (0.00–2.00)<input name="units" type="number" min="0" max="2" step="0.01" defaultValue="1.00" required /></label>
           <label>Conviction rationale (required at 2 units)<input name="confidenceRationale" placeholder="Specific independent evidence + timestamp" /></label>
           <label>Independent probability (%)<input name="consensus" type="number" min="0.01" max="99.99" step="0.01" /></label>
@@ -118,7 +121,7 @@ function Dashboard({ onLogout }: { onLogout: () => Promise<void> }) {
         <p className="help">Decisions are captured at entry time, not recalculated after the result. Settlement applies only to strategies that marked PAPER. Winning payout assumes $1 per contract; mark exceptional settlements void until verified.</p>
         <div className="table-wrap"><table><thead><tr><th>SNAPSHOT / CONTRACT</th><th>COST / MODEL / PAYOUT</th><th>A · VALUE</th><th>B · CONSENSUS</th><th>C · CROWD</th><th>OUTCOME</th></tr></thead><tbody>
           {entries.map((entry) => <tr key={entry.id}>
-            <td><strong>{entry.candidate.matchup}</strong><span>{entry.candidate.contract} · {entry.candidate.side}</span><span>{new Date(entry.candidate.observedAt).toLocaleString()}</span></td>
+            <td><strong>{entry.candidate.matchup}</strong><span>{entry.candidate.contract} · {entry.candidate.side}</span><span>{new Date(entry.candidate.observedAt).toLocaleString()}</span>{entry.candidate.modelSource && <span>Model: {entry.candidate.modelSource} · {entry.candidate.modelObservedAt ? new Date(entry.candidate.modelObservedAt).toLocaleString() : 'time missing'}</span>}</td>
             <td>{(entry.candidate.allInCost * 100).toFixed(2)}¢ / {(entry.candidate.modelProbability * 100).toFixed(1)}% / {entry.results[0]?.payoutMultiple?.toFixed(2) ?? '—'}×<span>{entry.candidate.units === undefined ? 'Legacy · 10 contracts' : `${entry.candidate.units.toFixed(2)} units · ${entry.contracts ?? 0} contracts · $${((entry.contracts ?? 0) * entry.candidate.allInCost).toFixed(2)} staked`}</span></td>
             {STRATEGIES.map((strategy) => { const result = entry.results.find((item) => item.id === strategy.id); return <td key={strategy.id}><b className={result?.status === 'PAPER' ? 'positive' : 'muted'}>{result?.status ?? '—'}</b><span className="reasons">{result?.reasons.join('; ') || 'All checks passed'}</span></td> })}
             <td><strong>{entry.outcome.toUpperCase()}</strong><div className="outcome-actions">{(['win', 'loss', 'void'] as const).map((outcome) => <button type="button" key={outcome} onClick={() => settle(entry.id, outcome)} aria-label={`Mark ${outcome}`}>{outcome}</button>)}</div></td>

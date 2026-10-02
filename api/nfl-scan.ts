@@ -1,7 +1,8 @@
 import { verifySessionToken } from './auth-core.js'
 import { collectDailyMarkets, NFL_SERIES, quoteForSize } from './nfl-core.js'
+import { forecastMarkets } from './nfl-forecast.js'
 
-type Request = { method?: string; headers?: { cookie?: string }; query?: { date?: string | string[]; ticker?: string | string[] } }
+type Request = { method?: string; headers?: { cookie?: string }; query?: { date?: string | string[]; ticker?: string | string[]; quantity?: string | string[]; forecast?: string | string[] } }
 type Response = { setHeader: (name: string, value: string) => void; status: (code: number) => { json: (body: unknown) => void } }
 const base = 'https://external-api.kalshi.com/trade-api/v2'
 
@@ -16,13 +17,18 @@ export default async function handler(request: Request, response: Response): Pro
     if (typeof ticker !== 'string' || !NFL_SERIES.some(([series]) => ticker.startsWith(`${series}-`)) || !/^KXNFL[A-Z0-9]+-[A-Z0-9-]{12,80}$/.test(ticker)) {
       response.status(400).json({ error: 'Invalid NFL ticker' }); return
     }
+    const quantityText = request.query?.quantity ?? '10'
+    if (typeof quantityText !== 'string' || !/^[1-9]\d{0,3}$/.test(quantityText) || Number(quantityText) > 1000) {
+      response.status(400).json({ error: 'Quantity must be 1–1000 whole contracts' }); return
+    }
+    const quantity = Number(quantityText)
     try {
       const upstream = await fetch(`${base}/markets/${ticker}/orderbook`, { signal: AbortSignal.timeout(10000) })
       if (!upstream.ok) throw new Error('Orderbook unavailable')
       const raw: unknown = await upstream.json()
       const book = raw as Parameters<typeof quoteForSize>[0]
-      response.status(200).json({ ticker, observedAt: new Date().toISOString(), source: `${base}/markets/${ticker}/orderbook`, raw,
-        yes: quoteForSize(book, 'yes', 10), no: quoteForSize(book, 'no', 10) })
+      response.status(200).json({ ticker, quantity, observedAt: new Date().toISOString(), source: `${base}/markets/${ticker}/orderbook`, raw,
+        yes: quoteForSize(book, 'yes', quantity), no: quoteForSize(book, 'no', quantity) })
     } catch { response.status(502).json({ error: 'Kalshi orderbook unavailable; no quote recorded' }) }
     return
   }
@@ -30,6 +36,16 @@ export default async function handler(request: Request, response: Response): Pro
   if (typeof date !== 'string' || !/^20\d{2}-\d{2}-\d{2}$/.test(date) || Number.isNaN(Date.parse(`${date}T00:00:00Z`))) {
     response.status(400).json({ error: 'Use a YYYY-MM-DD game date' }); return
   }
-  try { response.status(200).json(await collectDailyMarkets(date)) }
+  if (request.query?.forecast !== undefined && request.query.forecast !== '1') { response.status(400).json({ error: 'Invalid forecast mode' }); return }
+  try {
+    const scan = await collectDailyMarkets(date)
+    if (request.query?.forecast !== '1') { response.status(200).json(scan); return }
+    const source = 'https://raw.githubusercontent.com/nflverse/nfldata/master/data/games.csv'
+    const upstream = await fetch(source, { signal: AbortSignal.timeout(12000) })
+    if (!upstream.ok) throw new Error('Historical game data unavailable')
+    const csv = await upstream.text()
+    if (csv.length > 8_000_000) throw new Error('Historical game data too large')
+    response.status(200).json({ ...scan, forecasts: forecastMarkets(scan.markets, csv, date), modelSource: source, modelFetchedAt: new Date().toISOString() })
+  }
   catch { response.status(502).json({ error: 'Kalshi daily scan incomplete; no partial slate returned' }) }
 }

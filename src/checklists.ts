@@ -15,6 +15,8 @@ export type PaperCandidate = {
   units?: number
   highConfidence?: boolean
   confidenceRationale?: string
+  modelSource?: string
+  modelObservedAt?: string
 }
 
 export const PAPER_BANKROLL = 1000
@@ -56,6 +58,15 @@ export function evaluate(candidate: PaperCandidate, now = Date.now()): Assessmen
   if (!candidate.depthChecked) common.push('Executable depth and fees not checked')
   if (!validProbability(cost)) common.push('All-in cost must be between $0 and $1')
   if (!validProbability(model)) common.push('Model probability must be between 0% and 100%')
+  if (candidate.units !== undefined) {
+    const source = candidate.modelSource?.trim()
+    const modelTime = Date.parse(candidate.modelObservedAt ?? '')
+    if (!source || !Number.isFinite(modelTime)) common.push('Independent model source and calculation time required')
+    else {
+      if (/kalshi/i.test(source)) common.push('Kalshi market price is not independent model evidence')
+      if (modelTime > now || now - modelTime > 24 * 60 * 60_000) common.push('Model evidence is stale or in the future')
+    }
+  }
   if (!Number.isFinite(units) || units < 0 || units > 2 || Math.abs(units * 100 - Math.round(units * 100)) > 1e-8) common.push('Units must be 0.00–2.00 in 0.01 increments')
   else if (units === 0) common.push('Zero units means no paper bet')
   else if (validProbability(cost) && paperSize(units, cost).contracts === 0) common.push('Unit allocation cannot buy one whole contract')
