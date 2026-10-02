@@ -1,0 +1,50 @@
+import { describe, expect, it } from 'vitest'
+import { evaluate, type PaperCandidate } from './checklists'
+
+const candidate: PaperCandidate = {
+  matchup: 'Example vs Example', contract: 'GAME-WINNER', side: 'YES',
+  observedAt: '2026-10-02T18:00:00.000Z',
+  allInCost: 0.55, modelProbability: 0.64, consensusProbability: 0.62,
+  consensusSource: 'Independent quote snapshot', crowdMoneyPercent: 40,
+  crowdSource: 'Book sample, dollar split', rulesChecked: true, newsChecked: true,
+  depthChecked: true,
+}
+
+const now = Date.parse('2026-10-02T18:10:00.000Z')
+
+describe('paper checklist evaluations', () => {
+  it('runs the same snapshot through all three independent strategies', () => {
+    const results = evaluate(candidate, now)
+    expect(results.map((result) => result.status)).toEqual(['PAPER', 'PAPER', 'PAPER'])
+    expect(results[0].payoutMultiple).toBeCloseTo(1 / 0.55)
+  })
+
+  it('rejects shared failures including stale quotes and insufficient payout', () => {
+    const results = evaluate({ ...candidate, allInCost: 0.60, observedAt: '2026-10-02T17:00:00.000Z' }, now)
+    expect(results.every((result) => result.status === 'REJECT')).toBe(true)
+    expect(results[0].reasons).toContain('Winning payout is below 1.7× all-in cost')
+    expect(results[0].reasons).toContain('Snapshot is stale or in the future')
+  })
+
+  it('uses independent consensus only for the consensus strategy', () => {
+    const results = evaluate({ ...candidate, consensusProbability: null, consensusSource: '' }, now)
+    expect(results.map((result) => result.status)).toEqual(['PAPER', 'REJECT', 'PAPER'])
+  })
+
+  it('does not infer crowd money when missing and cautions rather than fading crowded sides', () => {
+    const missing = evaluate({ ...candidate, crowdMoneyPercent: null, crowdSource: '' }, now)
+    expect(missing.map((result) => result.status)).toEqual(['PAPER', 'PAPER', 'REJECT'])
+    const crowded = evaluate({ ...candidate, crowdMoneyPercent: 75 }, now)
+    expect(crowded.map((result) => result.status)).toEqual(['PAPER', 'PAPER', 'REJECT'])
+  })
+
+  it('rejects malformed probabilities and unchecked rules rather than passing NaN', () => {
+    const results = evaluate({ ...candidate, modelProbability: Number.NaN, rulesChecked: false }, now)
+    expect(results.every((result) => result.status === 'REJECT')).toBe(true)
+  })
+
+  it('separates a small model edge from a consensus-supported opportunity', () => {
+    const results = evaluate({ ...candidate, modelProbability: 0.58, consensusProbability: 0.62 }, now)
+    expect(results.map((result) => result.status)).toEqual(['REJECT', 'REJECT', 'REJECT'])
+  })
+})

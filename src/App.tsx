@@ -1,182 +1,126 @@
-import { useMemo, useState } from 'react'
+import { useState, type FormEvent } from 'react'
+import { evaluate, STRATEGIES, type Assessment, type PaperCandidate } from './checklists'
 import './styles.css'
 
-type Sport = 'All' | 'Basketball' | 'Football' | 'Tennis'
+type Outcome = 'pending' | 'win' | 'loss' | 'void'
+type Entry = { id: string; candidate: PaperCandidate; results: Assessment[]; outcome: Outcome }
+const STORAGE_KEY = 'edgeboard-paper-v1'
+const CONTRACTS = 10
 
-type Candidate = {
-  matchup: string
-  league: string
-  sport: Exclude<Sport, 'All'>
-  side: string
-  marketPrice: number
-  modelPrice: number
-  edge: number
-  liquidity: string
-  start: string
+function loadEntries(): Entry[] {
+  try {
+    const parsed: unknown = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]')
+    if (!Array.isArray(parsed)) return []
+    return parsed.filter((item): item is Entry =>
+      !!item && typeof item === 'object' && typeof item.id === 'string' &&
+      typeof item.candidate?.matchup === 'string' && Array.isArray(item.results) &&
+      ['pending', 'win', 'loss', 'void'].includes(item.outcome))
+  } catch { return [] }
 }
 
-const candidates: Candidate[] = [
-  {
-    matchup: 'Knicks @ Celtics',
-    league: 'NBA',
-    sport: 'Basketball',
-    side: 'Celtics YES',
-    marketPrice: 62,
-    modelPrice: 67,
-    edge: 5.0,
-    liquidity: '$1,240',
-    start: 'Tonight · 7:30 PM',
-  },
-  {
-    matchup: 'Duke vs. North Carolina',
-    league: 'NCAAB',
-    sport: 'Basketball',
-    side: 'Duke YES',
-    marketPrice: 54,
-    modelPrice: 58,
-    edge: 4.0,
-    liquidity: '$780',
-    start: 'Tomorrow · 6:00 PM',
-  },
-  {
-    matchup: 'Chiefs @ Bills',
-    league: 'NFL',
-    sport: 'Football',
-    side: 'Bills YES',
-    marketPrice: 49,
-    modelPrice: 55,
-    edge: 6.0,
-    liquidity: '$2,410',
-    start: 'Sun · 4:25 PM',
-  },
-  {
-    matchup: 'Michigan @ Ohio State',
-    league: 'NCAAF',
-    sport: 'Football',
-    side: 'Ohio State YES',
-    marketPrice: 57,
-    modelPrice: 60,
-    edge: 3.0,
-    liquidity: '$920',
-    start: 'Sat · 12:00 PM',
-  },
-  {
-    matchup: 'Alcaraz vs. Sinner',
-    league: 'ATP',
-    sport: 'Tennis',
-    side: 'Alcaraz YES',
-    marketPrice: 51,
-    modelPrice: 57,
-    edge: 6.0,
-    liquidity: '$1,560',
-    start: 'Fri · 2:00 PM',
-  },
-  {
-    matchup: 'Gauff vs. Swiatek',
-    league: 'WTA',
-    sport: 'Tennis',
-    side: 'Gauff YES',
-    marketPrice: 46,
-    modelPrice: 50,
-    edge: 4.0,
-    liquidity: '$1,130',
-    start: 'Sat · 11:00 AM',
-  },
-]
-
-const sports: Sport[] = ['All', 'Basketball', 'Football', 'Tennis']
-
 function App() {
-  const [sport, setSport] = useState<Sport>('All')
-  const [query, setQuery] = useState('')
+  const [entries, setEntries] = useState<Entry[]>(loadEntries)
+  const [notice, setNotice] = useState('')
 
-  const filteredCandidates = useMemo(() => {
-    const normalizedQuery = query.trim().toLowerCase()
-    return candidates.filter((candidate) => {
-      const matchesSport = sport === 'All' || candidate.sport === sport
-      const matchesQuery =
-        normalizedQuery.length === 0 ||
-        `${candidate.matchup} ${candidate.league} ${candidate.side}`.toLowerCase().includes(normalizedQuery)
-      return matchesSport && matchesQuery
-    })
-  }, [query, sport])
+  function save(next: Entry[]) {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(next))
+      setEntries(next)
+      setNotice('')
+    } catch { setNotice('Browser storage is full or unavailable. This snapshot was NOT saved.') }
+  }
+
+  function logSnapshot(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const form = event.currentTarget
+    const data = new FormData(form)
+    const read = (key: string) => String(data.get(key) || '').trim()
+    const optionalPercent = (key: string) => read(key) === '' ? null : Number(read(key)) / 100
+    const optionalShare = (key: string) => read(key) === '' ? null : Number(read(key))
+    const candidate: PaperCandidate = {
+      matchup: read('matchup'), contract: read('contract'), side: read('side'),
+      observedAt: new Date(read('quoteTime')).toISOString(),
+      allInCost: Number(read('cost')) / 100,
+      modelProbability: Number(read('model')) / 100,
+      consensusProbability: optionalPercent('consensus'), consensusSource: read('consensusSource'),
+      crowdMoneyPercent: optionalShare('crowd'), crowdSource: read('crowdSource'),
+      rulesChecked: data.has('rules'), newsChecked: data.has('news'), depthChecked: data.has('depth'),
+    }
+    const next = [{ id: crypto.randomUUID(), candidate, results: evaluate(candidate), outcome: 'pending' as Outcome }, ...entries]
+    save(next)
+    if (localStorage.getItem(STORAGE_KEY) === JSON.stringify(next)) form.reset()
+  }
+
+  function settle(id: string, outcome: Outcome) {
+    save(entries.map((entry) => entry.id === id ? { ...entry, outcome } : entry))
+  }
 
   return (
     <main className="shell">
       <header className="topbar">
-        <a className="brand" href="#overview" aria-label="Edgeboard home">
-          <span className="brand-mark">E</span>
-          <span>EDGEBOARD</span>
-        </a>
-        <div className="status"><span className="dot" /> PAPER MODE · NO LIVE ORDERS</div>
+        <a className="brand" href="#overview" aria-label="Edgeboard home"><span className="brand-mark">E</span><span>EDGEBOARD</span></a>
+        <div className="status"><span className="dot" /> PAPER MODE · MANUAL DATA · NO ORDERS</div>
       </header>
-
       <section className="hero" id="overview">
         <div>
-          <p className="eyebrow">KALSHI SPORTS RESEARCH</p>
-          <h1>Find the gap.<br /><em>Test the edge.</em></h1>
-          <p className="lede">A paper-only command center for tracking market probabilities, model estimates, and the execution reality in between.</p>
+          <p className="eyebrow">KALSHI SPORTS RESEARCH / EXPERIMENT 01</p>
+          <h1>Three filters.<br /><em>One honest record.</em></h1>
+          <p className="lede">Run the same candidate through three frozen checklists. Record every rejection and settlement. These are hypotheses, not proven betting edges.</p>
         </div>
-        <aside className="risk-card" aria-label="Paper risk controls">
-          <span>SIMULATED BANKROLL</span>
-          <strong>$1,000.00</strong>
-          <div><b>$25</b> max position <b>10</b> positions max</div>
-        </aside>
+        <aside className="risk-card"><span>FIXED PAPER SIZE</span><strong>{CONTRACTS} contracts</strong><div>Manual snapshots only. Local to this browser; clearing its data erases the log. No live market connection.</div></aside>
       </section>
-
-      <section className="stats" aria-label="Paper-trading summary">
-        <article><span>QUALIFIED CANDIDATES</span><strong>06</strong><small>after risk + liquidity filters</small></article>
-        <article><span>AVERAGE MODEL EDGE</span><strong className="positive">+4.7¢</strong><small>before fees and simulated fills</small></article>
-        <article><span>OPEN PAPER EXPOSURE</span><strong>$0.00</strong><small>no positions are open</small></article>
+      <section className="checklist-grid" aria-label="Paper strategies">
+        {STRATEGIES.map((strategy) => {
+          const picks = entries.filter((entry) => entry.results.some((result) => result.id === strategy.id && result.status === 'PAPER'))
+          const settled = picks.filter((entry) => entry.outcome === 'win' || entry.outcome === 'loss')
+          const profit = settled.reduce((sum, entry) => sum + CONTRACTS * (entry.outcome === 'win' ? 1 - entry.candidate.allInCost : -entry.candidate.allInCost), 0)
+          const stake = settled.reduce((sum, entry) => sum + CONTRACTS * entry.candidate.allInCost, 0)
+          return <article className="strategy" key={strategy.id}>
+            <h2>{strategy.name}</h2><p>{strategy.rule}</p>
+            <div className="strategy-stats"><span>{picks.length} paper picks</span><span>{settled.length} settled</span></div>
+            <strong>{settled.length ? `${profit >= 0 ? '+' : ''}$${profit.toFixed(2)}` : '—'}</strong>
+            <small>{settled.length ? `Net simulation · ${(profit / stake * 100).toFixed(1)}% ROI` : 'No settled picks · no performance claim'}</small>
+          </article>
+        })}
       </section>
-
-      <section className="board" aria-labelledby="candidate-heading">
-        <div className="board-heading">
-          <div>
-            <p className="eyebrow">WATCHLIST</p>
-            <h2 id="candidate-heading">Paper candidates</h2>
+      <section className="board" aria-labelledby="entry-heading">
+        <div className="board-heading"><div><p className="eyebrow">01 / CAPTURE</p><h2 id="entry-heading">Log a candidate</h2></div></div>
+        <p className="help">Enter the exact contract, quote observation time, and executable all-in per-contract cost (price + applicable fees/depth). Type your own model estimate. A separate source is required for B; a sourced dollar split for this exact side is required for C. Unknown inputs reject those strategies, never default to zero.</p>
+        <form onSubmit={logSnapshot} className="entry-form">
+          <label>Matchup<input name="matchup" required placeholder="Team A @ Team B" /></label>
+          <label>Exact contract<input name="contract" required placeholder="Kalshi ticker / resolution" /></label>
+          <label>Side<input name="side" required placeholder="Team A YES / Over 45.5" /></label>
+          <label>Quote observed at<input name="quoteTime" type="datetime-local" required /></label>
+          <label>All-in cost per contract (¢)<input name="cost" type="number" min="0.01" max="99.99" step="0.01" required /></label>
+          <label>Model win probability (%)<input name="model" type="number" min="0.01" max="99.99" step="0.01" required /></label>
+          <label>Independent probability (%)<input name="consensus" type="number" min="0.01" max="99.99" step="0.01" /></label>
+          <label>Independent source<input name="consensusSource" placeholder="Source + quote time" /></label>
+          <label>Dollar share on our side (%)<input name="crowd" type="number" min="0" max="100" step="0.01" /></label>
+          <label>Dollar split source<input name="crowdSource" placeholder="Reporting book(s) + time" /></label>
+          <div className="confirmations">
+            <label><input type="checkbox" name="rules" /> Contract rules checked</label>
+            <label><input type="checkbox" name="news" /> News checked</label>
+            <label><input type="checkbox" name="depth" /> Depth and fees checked</label>
           </div>
-          <label className="search">
-            <span className="sr-only">Search candidates</span>
-            <input
-              aria-label="Search candidates"
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder="Search matchup or league"
-              value={query}
-            />
-          </label>
-        </div>
-
-        <div className="filters" aria-label="Sport filter">
-          {sports.map((name) => (
-            <button className={sport === name ? 'active' : ''} key={name} onClick={() => setSport(name)} type="button">
-              {name}
-            </button>
-          ))}
-        </div>
-
-        <div className="table-wrap">
-          <table>
-            <thead><tr><th>EVENT</th><th>SIDE</th><th>MARKET</th><th>MODEL</th><th>EDGE</th><th>LIQUIDITY</th><th>START</th></tr></thead>
-            <tbody>
-              {filteredCandidates.map((candidate) => (
-                <tr key={candidate.matchup}>
-                  <td><strong>{candidate.matchup}</strong><span>{candidate.league} · {candidate.sport}</span></td>
-                  <td>{candidate.side}</td>
-                  <td>{candidate.marketPrice}¢</td>
-                  <td>{candidate.modelPrice}¢</td>
-                  <td className="positive">+{candidate.edge.toFixed(1)}¢</td>
-                  <td>{candidate.liquidity}</td>
-                  <td>{candidate.start}</td>
-                </tr>
-              ))}
-              {filteredCandidates.length === 0 && <tr><td className="empty" colSpan={7}>No paper candidates match that filter.</td></tr>}
-            </tbody>
-          </table>
-        </div>
+          <button className="primary" type="submit">Log paper snapshot</button>
+          {notice && <p role="alert">{notice}</p>}
+        </form>
       </section>
-
-      <footer>PROTOTYPE FIXTURE DATA · NOT CONNECTED TO KALSHI · NOT FINANCIAL ADVICE</footer>
+      <section className="board" aria-labelledby="log-heading">
+        <p className="eyebrow">02 / AUDIT</p><h2 id="log-heading">All candidates</h2>
+        <p className="help">Decisions are captured at entry time, not recalculated after the result. Settlement applies only to strategies that marked PAPER. Winning payout assumes $1 per contract; mark exceptional settlements void until verified.</p>
+        <div className="table-wrap"><table><thead><tr><th>SNAPSHOT / CONTRACT</th><th>COST / MODEL / PAYOUT</th><th>A · VALUE</th><th>B · CONSENSUS</th><th>C · CROWD</th><th>OUTCOME</th></tr></thead><tbody>
+          {entries.map((entry) => <tr key={entry.id}>
+            <td><strong>{entry.candidate.matchup}</strong><span>{entry.candidate.contract} · {entry.candidate.side}</span><span>{new Date(entry.candidate.observedAt).toLocaleString()}</span></td>
+            <td>{(entry.candidate.allInCost * 100).toFixed(2)}¢ / {(entry.candidate.modelProbability * 100).toFixed(1)}% / {entry.results[0]?.payoutMultiple?.toFixed(2) ?? '—'}×</td>
+            {STRATEGIES.map((strategy) => { const result = entry.results.find((item) => item.id === strategy.id); return <td key={strategy.id}><b className={result?.status === 'PAPER' ? 'positive' : 'muted'}>{result?.status ?? '—'}</b><span className="reasons">{result?.reasons.join('; ') || 'All checks passed'}</span></td> })}
+            <td><strong>{entry.outcome.toUpperCase()}</strong><div className="outcome-actions">{(['win', 'loss', 'void'] as const).map((outcome) => <button type="button" key={outcome} onClick={() => settle(entry.id, outcome)} aria-label={`Mark ${outcome}`}>{outcome}</button>)}</div></td>
+          </tr>)}
+          {entries.length === 0 && <tr><td className="empty" colSpan={6}>No candidates logged yet.</td></tr>}
+        </tbody></table></div>
+        <p className="help">{entries.filter((entry) => entry.outcome === 'win' || entry.outcome === 'loss').length} settled snapshots · {entries.reduce((total, entry) => total + (entry.outcome === 'win' || entry.outcome === 'loss' ? entry.results.filter((result) => result.status === 'PAPER').length : 0), 0)} eligible strategies settled. Not independent bets when strategies agree on a candidate.</p>
+      </section>
+      <footer>MANUAL LOCAL PAPER LOG · NO KALSHI CONNECTION · NO REAL ORDERS · NOT FINANCIAL ADVICE</footer>
     </main>
   )
 }
