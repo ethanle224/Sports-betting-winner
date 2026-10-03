@@ -1,5 +1,5 @@
 type Request = { method?: string }
-type Response = { end: () => void; setHeader: (name: string, value: string) => void; status: (code: number) => { json: (body: unknown) => void } }
+type Response = { end: () => void; setHeader: (name: string, value: string) => void; status: (code: number) => { json: (body: unknown) => void; end: () => void } }
 
 export default function handler(request: Request, response: Response): void {
   if (request.method !== 'POST') {

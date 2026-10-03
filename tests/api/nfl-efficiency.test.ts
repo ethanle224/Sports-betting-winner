@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest'
-import { matchupContext, type EfficiencySnapshot } from './nfl-efficiency'
+import { matchupContext, type EfficiencySnapshot } from '../../server/nfl-efficiency'
 
 const games = Array.from({ length: 8 }, (_, i) => [
   { gameId: `2025_${i}_AAA_BBB`, date: `2025-09-${String(i + 1).padStart(2, '0')}`, team: 'AAA', opponent: 'BBB', plays: 50, epaSum: 10, successes: 25, firstDowns: 15, drives: 10 },

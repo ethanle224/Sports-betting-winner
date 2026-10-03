@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest'
-import { parseEspnOdds, forecastFromSportsbook, parseArchivedMarketGamesCsv } from './nfl-bookmaker'
+import { parseEspnOdds, forecastFromSportsbook, parseArchivedMarketGamesCsv } from '../../server/nfl-bookmaker'
 
 const event = (spread = -4.5, total = 47.5) => ({ id: '401', date: '2026-10-04T17:00:00Z', status: { type: { state: 'pre' } },
   competitions: [{ competitors: [

@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { gzipSync } from 'node:zlib'
-import { createSessionToken } from './auth-core'
-import handler from './nfl-scan'
+import { createSessionToken } from '../../server/auth-core'
+import handler from '../../api/nfl-scan'
 
 const token = createSessionToken('Admin', 'test-secret')
 function response() {

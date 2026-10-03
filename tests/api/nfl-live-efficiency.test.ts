@@ -1,8 +1,8 @@
 import { gzipSync } from 'node:zlib'
 import { expect, it, vi } from 'vitest'
-import { refreshEfficiency } from './nfl-live-efficiency'
-import type { CompletedGame } from './nfl-model'
-import type { EfficiencySnapshot } from './nfl-efficiency'
+import { refreshEfficiency } from '../../server/nfl-live-efficiency'
+import type { CompletedGame } from '../../server/nfl-model'
+import type { EfficiencySnapshot } from '../../server/nfl-efficiency'
 
 const snapshot: EfficiencySnapshot = { version: 1, generatedAt: '2026-10-02T00:00:00Z', lastGameDate: '2026-10-01', sources: [], games: [] }
 const played: CompletedGame[] = [

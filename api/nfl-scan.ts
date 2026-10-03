@@ -1,12 +1,12 @@
-import { verifySessionToken } from './auth-core.js'
-import { collectDailyMarkets, NFL_SERIES, quoteForSize } from './nfl-core.js'
-import { forecastMarkets, gameCode } from './nfl-forecast.js'
-import { parseEspnOdds } from './nfl-bookmaker.js'
-import { parseGamesCsv, parseScheduleCsv } from './nfl-model.js'
-import { matchupContext, type EfficiencySnapshot } from './nfl-efficiency.js'
-import { refreshEfficiency } from './nfl-live-efficiency.js'
-import { fetchPreseason, weightedTeamForm } from './nfl-preseason.js'
-import efficiencySnapshot from './data/nfl-efficiency.json' with { type: 'json' }
+import { verifySessionToken } from '../server/auth-core.js'
+import { collectDailyMarkets, NFL_SERIES, quoteForSize } from '../server/nfl-core.js'
+import { forecastMarkets, gameCode } from '../server/nfl-forecast.js'
+import { parseEspnOdds } from '../server/nfl-bookmaker.js'
+import { parseGamesCsv, parseScheduleCsv } from '../server/nfl-model.js'
+import { matchupContext, type EfficiencySnapshot } from '../server/nfl-efficiency.js'
+import { refreshEfficiency } from '../server/nfl-live-efficiency.js'
+import { fetchPreseason, weightedTeamForm } from '../server/nfl-preseason.js'
+import efficiencySnapshot from '../server/data/nfl-efficiency.json' with { type: 'json' }
 
 type Request = { method?: string; headers?: { cookie?: string }; query?: { date?: string | string[]; ticker?: string | string[]; quantity?: string | string[]; forecast?: string | string[] } }
 type Response = { setHeader: (name: string, value: string) => void; status: (code: number) => { json: (body: unknown) => void } }

@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest'
-import { fitScoreModel, forecastGame, parseGamesCsv, type CompletedGame } from './nfl-model'
+import { fitScoreModel, forecastGame, parseGamesCsv, type CompletedGame } from '../../server/nfl-model'
 
 const history: CompletedGame[] = Array.from({ length: 32 }, (_, i) => ({
   date: `2025-${String(1 + Math.floor(i / 4)).padStart(2, '0')}-${String(1 + (i % 4) * 6).padStart(2, '0')}`,

@@ -1,5 +1,5 @@
 import { expect, it, vi } from 'vitest'
-import { collectDailyMarkets, quoteForSize } from './nfl-core'
+import { collectDailyMarkets, quoteForSize } from '../../server/nfl-core'
 
 const market = (series: string, event = `${series}-26OCT04INDWAS`, ticker = `${event}-IND`) => ({
   event_ticker: event, ticker, title: 'Indianapolis wins', rules_primary: 'If Indianapolis wins, resolves Yes',

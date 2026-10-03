@@ -1,7 +1,7 @@
 import { expect, it } from 'vitest'
-import { fitScoreModel, parseGamesCsv } from './nfl-model'
-import { forecastMarkets } from './nfl-forecast'
-import type { ScannedMarket } from './nfl-core'
+import { fitScoreModel, parseGamesCsv } from '../../server/nfl-model'
+import { forecastMarkets } from '../../server/nfl-forecast'
+import type { ScannedMarket } from '../../server/nfl-core'
 
 const csv = 'game_type,gameday,home_team,away_team,home_score,away_score\n' +
   Array.from({ length: 32 }, (_, i) => `REG,2025-${String(1 + Math.floor(i / 4)).padStart(2, '0')}-${String(1 + (i % 4) * 6).padStart(2, '0')},CIN,JAX,${20 + i % 8},${17 + i % 6}`).join('\n') +

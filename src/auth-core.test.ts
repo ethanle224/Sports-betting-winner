@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { createSessionToken, verifySessionToken } from '../api/auth-core'
+import { createSessionToken, verifySessionToken } from '../server/auth-core'
 
 describe('session tokens', () => {
   it('verifies a signed unexpired admin session', () => {

@@ -1,9 +1,9 @@
 import { useState } from 'react'
-import type { ScannedMarket } from '../api/nfl-core'
-import type { MarketForecast } from '../api/nfl-forecast'
-import type { BookmakerLine } from '../api/nfl-bookmaker'
-import type { MatchupContext } from '../api/nfl-efficiency'
-import type { WeightedTeamForm } from '../api/nfl-preseason'
+import type { ScannedMarket } from '../server/nfl-core'
+import type { MarketForecast } from '../server/nfl-forecast'
+import type { BookmakerLine } from '../server/nfl-bookmaker'
+import type { MatchupContext } from '../server/nfl-efficiency'
+import type { WeightedTeamForm } from '../server/nfl-preseason'
 
 type DailyScan = { date: string; collectedAt: string; coverage: { complete: boolean; count: number };
   series: { ticker: string; kind: string; phase: string; count: number }[]; markets: ScannedMarket[];

@@ -2,8 +2,8 @@
 // Run: npx esbuild scripts/evaluate-nfl-bookmaker.ts --bundle --platform=node --format=esm --outfile=<temp>/eval.mjs && node <temp>/eval.mjs [report.json]
 import { createHash } from 'node:crypto'
 import { writeFileSync } from 'node:fs'
-import { csvRows, fitScoreModel, forecastGame, parseGamesCsv, type ScoreForecast } from '../api/nfl-model.js'
-import { forecastFromSportsbook, parseArchivedMarketGamesCsv, type BookmakerLine } from '../api/nfl-bookmaker.js'
+import { csvRows, fitScoreModel, forecastGame, parseGamesCsv, type ScoreForecast } from '../server/nfl-model.js'
+import { forecastFromSportsbook, parseArchivedMarketGamesCsv, type BookmakerLine } from '../server/nfl-bookmaker.js'
 
 const source = 'https://raw.githubusercontent.com/nflverse/nfldata/master/data/games.csv'
 const response = await fetch(source, { signal: AbortSignal.timeout(30000) })

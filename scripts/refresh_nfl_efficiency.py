@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 YEARS = (2023, 2024, 2025, 2026)
 SOURCE = 'https://github.com/nflverse/nflverse-data/releases/download/pbp/play_by_play_{}.csv.gz'
 ROOT = Path(__file__).resolve().parents[1]
-OUTPUT = ROOT / 'api' / 'data' / 'nfl-efficiency.json'
+OUTPUT = ROOT / 'server' / 'data' / 'nfl-efficiency.json'
 CACHE = Path(os.getenv('LOCALAPPDATA', '/tmp')) / 'Temp' / 'edgeboard-nfl-pbp'
 
 

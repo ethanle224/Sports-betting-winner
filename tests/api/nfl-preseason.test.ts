@@ -1,6 +1,6 @@
 import { expect, it, vi } from 'vitest'
-import { fetchPreseason, parsePreseason, weightedTeamForm } from './nfl-preseason'
-import type { CompletedGame } from './nfl-model'
+import { fetchPreseason, parsePreseason, weightedTeamForm } from '../../server/nfl-preseason'
+import type { CompletedGame } from '../../server/nfl-model'
 
 const event = (date = '2026-08-13T23:00:00Z', completed = true) => ({
   id: '401', date, season: { year: 2026, type: 1 }, status: { type: { completed } },
