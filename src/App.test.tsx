@@ -32,7 +32,15 @@ describe('Edgeboard dashboard', () => {
     const payload = { date: '2026-10-04', collectedAt: '2026-10-04T10:00:00Z', coverage: { complete: true, count: 1 },
       series: kinds.map((kind) => ({ ticker: kind.replaceAll(' ', ''), kind, phase: kind.startsWith('Second') ? 'halftime' : 'pregame', count: kind === 'Game winner' ? 1 : 0 })),
       markets: [{ series: 'KXNFLGAME', kind: 'Game winner', phase: 'pregame', gameDate: '2026-10-04', eventTicker: 'KXNFLGAME-26OCT04INDWAS', ticker: 'KXNFLGAME-26OCT04INDWAS-IND', title: 'Indianapolis wins', rules: 'Tie pays $0.50', indicativeAsk: 0.55, indicativeSize: 20 }],
-      forecasts: [{ ticker: 'KXNFLGAME-26OCT04INDWAS-IND', status: 'MODELED', reason: 'Experimental only', probabilityYes: 0.58, probabilityNo: 0.4, tieProbability: 0.02, modelVersion: 'pregame-score-v1', trainingGames: 500 }] }
+      forecasts: [{ ticker: 'KXNFLGAME-26OCT04INDWAS-IND', status: 'MODELED', reason: 'Experimental only', probabilityYes: 0.58, probabilityNo: 0.4, tieProbability: 0.02, modelVersion: 'sportsbook-score-v2', modelSource: 'Draft Kings via ESPN', trainingGames: 500 }],
+      bookmakerLines: [{ home: 'WAS', away: 'IND', homeSpread: 4.5, total: 47.5, provider: 'Draft Kings', eventId: '401', kickoff: '2026-10-04T17:00:00Z', observedAt: '2026-10-02T12:00:00Z' }],
+      bookmakerStatus: 'observed', efficiencyStatus: 'refreshed', efficiencySnapshotThrough: '2026-10-01', preseasonStatus: 'observed',
+      contexts: [{ event: '26OCT04INDWAS', home: 'WAS', away: 'IND',
+        homeForm: { team: 'WAS', currentGames: 3, previousGames: 8, preseasonGames: 2, pointsFor: 25.5, pointsAgainst: 20, weights: { currentRegular: 4, previousRegular: 1, currentPreseason: 0.5 }, probabilityAdjustment: false },
+        awayForm: { team: 'IND', currentGames: 3, previousGames: 8, preseasonGames: 2, pointsFor: 28, pointsAgainst: 18, weights: { currentRegular: 4, previousRegular: 1, currentPreseason: 0.5 }, probabilityAdjustment: false },
+        context: { snapshotThrough: '2026-10-01', probabilityAdjustment: false,
+        home: { team: 'WAS', offense: { epaPerPlay: 0.1, successRate: 0.45, firstDownsPerGame: 20, playsPerGame: 60 }, opposingDefense: { epaPerPlay: -0.02, successRate: 0.43, firstDownsPerGame: 18 } },
+        away: { team: 'IND', offense: { epaPerPlay: 0.12, successRate: 0.47, firstDownsPerGame: 21, playsPerGame: 62 }, opposingDefense: { epaPerPlay: 0.03, successRate: 0.42, firstDownsPerGame: 19 } } } }] }
     const fetcher = vi.spyOn(globalThis, 'fetch').mockResolvedValue({ ok: true, json: async () => payload } as Response)
     render(<App />)
     await screen.findByText('A · Value baseline')
@@ -42,6 +50,13 @@ describe('Edgeboard dashboard', () => {
     fireEvent.click(screen.getByText(/26OCT04INDWAS · 1 contracts/))
     expect(screen.getByText(/Game winner: Indianapolis wins/)).toBeInTheDocument()
     expect(screen.getByText(/experimental YES 58.0%/i)).toBeInTheDocument()
+    expect(screen.getByText(/Draft Kings.*47.5/)).toBeInTheDocument()
+    expect(screen.getByText(/IND offense.*WAS defense/)).toBeInTheDocument()
+    expect(screen.getByText(/first downs\/game/i)).toBeInTheDocument()
+    expect(screen.getByText(/success rate.*IND 47%.*WAS allows 42%/i)).toBeInTheDocument()
+    expect(screen.getByText(/Efficiency.*refreshed.*2026-10-01/i)).toBeInTheDocument()
+    expect(screen.getByText(/current-season-first form.*4×.*0.5× preseason/i)).toBeInTheDocument()
+    expect(screen.getByText(/WAS.*3 current.*2 preseason/i)).toBeInTheDocument()
     expect(screen.getByText('Second-half total')).toBeInTheDocument()
     expect(screen.getByText('No candidates logged yet.')).toBeInTheDocument()
     expect(fetcher).toHaveBeenCalledWith('/api/nfl-scan?date=2026-10-04&forecast=1', expect.objectContaining({ credentials: 'same-origin' }))

@@ -1,10 +1,18 @@
 import { useState } from 'react'
 import type { ScannedMarket } from '../api/nfl-core'
 import type { MarketForecast } from '../api/nfl-forecast'
+import type { BookmakerLine } from '../api/nfl-bookmaker'
+import type { MatchupContext } from '../api/nfl-efficiency'
+import type { WeightedTeamForm } from '../api/nfl-preseason'
 
 type DailyScan = { date: string; collectedAt: string; coverage: { complete: boolean; count: number };
   series: { ticker: string; kind: string; phase: string; count: number }[]; markets: ScannedMarket[];
-  forecasts?: MarketForecast[]; modelSource?: string; modelFetchedAt?: string }
+  forecasts?: MarketForecast[]; modelSource?: string; modelFetchedAt?: string;
+  bookmakerLines?: BookmakerLine[]; bookmakerStatus?: string; bookmakerSource?: string;
+  contexts?: { event: string; home: string; away: string; context: MatchupContext | null;
+    homeForm?: WeightedTeamForm | null; awayForm?: WeightedTeamForm | null }[];
+  efficiencyStatus?: 'current' | 'refreshed' | 'unavailable'; efficiencySnapshotThrough?: string | null;
+  preseasonStatus?: 'observed' | 'unavailable'; preseasonObservedAt?: string; preseasonSources?: string[] }
 type Quote = { ticker: string; quantity: number; observedAt: string; source: string; raw: unknown;
   yes: { price: number; estimatedAllIn: number; estimatedFee: number } | null;
   no: { price: number; estimatedAllIn: number; estimatedFee: number } | null }
@@ -63,17 +71,34 @@ export default function NflScanner() {
   }, {})
   return <section className="board" aria-labelledby="scanner-heading">
     <p className="eyebrow">00 / DISCOVER</p><h2 id="scanner-heading">NFL day scanner</h2>
-    <p className="help">Scan every listed contract across nine NFL market families. A score-history model estimates exact pregame winner, spread, and total lines; halves are unrated. Experimental forecasts are NOT validated edges or paper picks. Inspect depth for ONE contract at the intended size; indicative asks are not fills.</p>
+    <p className="help">Scan every listed contract across nine NFL market families. An independent sportsbook spread/total anchors available exact pregame winner, spread, and total forecasts; the older scores-only baseline is labeled separately when odds are missing. Halves are unrated. Updated football efficiency and current-season-first form (with low-weight preseason games) are context, not probability adjustments. Neither forecast is a validated edge or paper pick. Inspect depth for ONE contract at the intended size; indicative asks are not fills.</p>
     <div className="scan-controls"><label>NFL game date <input type="date" value={date} onChange={(event) => { setDate(event.target.value); setScan(null); setQuote(null) }} /></label><button className="primary" type="button" disabled={busy} onClick={() => void run()}>{busy ? 'Scanning…' : 'Scan NFL day'}</button></div>
     {error && <p role="alert">{error}</p>}
     {visible && <>
       <p className="help">Complete scan from {new Date(visible.collectedAt).toLocaleString()} · {visible.coverage.count} listed contracts · {Object.keys(grouped).length} events. Stored in this browser only; prices age immediately.</p>
       <p className="help">{visible.forecasts ? `${visible.forecasts.filter((item) => item.status === 'MODELED').length} experimental pregame forecasts · ${visible.forecasts.filter((item) => item.status === 'UNRATED').length} unrated.` : 'Older scan: no independent forecasts.'} No automatic paper picks: model has not beaten archived bookmaker odds in walk-forward testing. No A/B/C pass is claimed without verified executable quotes and independent consensus.</p>
+      {visible.bookmakerStatus && <p className="help">External sportsbook odds: {visible.bookmakerStatus}. ESPN gives no quote-update time here; collection time does not prove odds freshness. {visible.bookmakerSource && <a href={visible.bookmakerSource} target="_blank" rel="noreferrer">Source</a>}</p>}
+      {visible.efficiencyStatus && <p className="help">Efficiency {visible.efficiencyStatus}{visible.efficiencySnapshotThrough ? ` through ${visible.efficiencySnapshotThrough}` : ': latest completed-game source unavailable; stale stats hidden'}. Final scores and sportsbook odds are checked afresh with each scan.</p>}
+      {visible.preseasonStatus && <p className="help">Preseason results: {visible.preseasonStatus}. Only completed games known before the selected date count; preseason scores are weaker evidence because rosters and play-calling can differ. {visible.preseasonSources?.[0] && <a href={visible.preseasonSources[0]} target="_blank" rel="noreferrer">Source</a>}</p>}
       <div className="scan-controls"><label>Quote size (whole contracts) <input type="number" min="1" max="1000" step="1" value={quantity} onChange={(event) => setQuantity(Number(event.target.value))} /></label></div>
       <div className="series-grid">{visible.series.map((item) => <span key={item.ticker}>{item.kind} <b>{item.count}</b></span>)}</div>
-      {Object.entries(grouped).map(([event, markets]) => <details key={event} className="scan-event"><summary>{event} · {markets?.length ?? 0} contracts</summary>
-        <div className="scan-market-list">{markets?.map((market) => { const forecast = forecastByTicker.get(market.ticker); return <article key={market.ticker}><div><strong>{market.kind}: {market.title}</strong><small>{market.ticker} · {market.phase === 'halftime' ? 'Halftime review only' : 'Pregame review'}</small><small>Indicative YES ask {market.indicativeAsk === null ? 'unavailable' : `${(market.indicativeAsk * 100).toFixed(1)}¢`} · displayed size {market.indicativeSize ?? 'unknown'}</small><small>{forecast?.status === 'MODELED' ? `Experimental YES ${(forecast.probabilityYes! * 100).toFixed(1)}% · NO ${(forecast.probabilityNo! * 100).toFixed(1)}%${forecast.tieProbability ? ` · tie ${(forecast.tieProbability * 100).toFixed(1)}% (half payout)` : ''} · ${forecast.modelVersion} · ${forecast.trainingGames} past games` : `Unrated: ${forecast?.reason ?? 'forecast unavailable'}`}</small><details><summary>Contract rules</summary><p>{market.rules || 'Not available: abstain'}</p></details></div><button type="button" onClick={() => void inspect(market.ticker)}>Inspect book</button></article> })}</div>
-      </details>)}
+      {Object.entries(grouped).map(([event, markets]) => {
+        const matchup = visible.contexts?.find((item) => item.event === event)
+        const line = visible.bookmakerLines?.find((item) => item.home === matchup?.home && item.away === matchup?.away)
+        const context = matchup?.context
+        return <details key={event} className="scan-event"><summary>{event} · {markets?.length ?? 0} contracts</summary>
+          {line && <p className="help">{line.provider} sportsbook: {line.home} {line.homeSpread < 0 ? '' : '+'}{line.homeSpread.toFixed(1)} spread · {line.total.toFixed(1)} total · observed {new Date(line.observedAt).toLocaleString()}. External baseline, not a Kalshi quote.</p>}
+          {matchup?.homeForm && matchup.awayForm && <div className="help"><p>Current-season-first form: 4× this regular season, 1× last season, 0.5× preseason per game. Descriptive scoring only; these weights have NOT improved the tested forecast and do not change its probability.</p>
+            {[matchup.awayForm, matchup.homeForm].map((form) => <p key={form.team}>{form.team}: {form.currentGames} current · {form.previousGames} previous · {form.preseasonGames} preseason · weighted {form.pointsFor.toFixed(1)} scored / {form.pointsAgainst.toFixed(1)} allowed per game.</p>)}</div>}
+          {context && <div className="help"><p>Football context through {context.snapshotThrough} (not used to adjust forecast). EPA = expected points added per play; higher offense and lower defense-allowed is better.</p>
+            <p><strong>first downs/game</strong>: {context.away.team} {context.away.offense.firstDownsPerGame.toFixed(1)} vs {context.home.team} allowed {context.away.opposingDefense.firstDownsPerGame.toFixed(1)}; {context.home.team} {context.home.offense.firstDownsPerGame.toFixed(1)} vs {context.away.team} allowed {context.home.opposingDefense.firstDownsPerGame.toFixed(1)}.</p>
+            <p>Success rate: {context.away.team} {(context.away.offense.successRate * 100).toFixed(0)}% vs {context.home.team} allows {(context.away.opposingDefense.successRate * 100).toFixed(0)}%; {context.home.team} {(context.home.offense.successRate * 100).toFixed(0)}% vs {context.away.team} allows {(context.home.opposingDefense.successRate * 100).toFixed(0)}%.</p>
+            <p>{context.away.team} offense EPA {context.away.offense.epaPerPlay.toFixed(2)} vs {context.home.team} defense allowed {context.away.opposingDefense.epaPerPlay.toFixed(2)} · {context.away.team} offense vs {context.home.team} defense · {context.away.offense.playsPerGame.toFixed(1)} plays/game.</p>
+            <p>{context.home.team} offense EPA {context.home.offense.epaPerPlay.toFixed(2)} vs {context.away.team} defense allowed {context.home.opposingDefense.epaPerPlay.toFixed(2)} · {context.home.offense.playsPerGame.toFixed(1)} plays/game.</p></div>}
+          {matchup && !context && <p className="help">Efficiency context unavailable or out of date; no stats inferred.</p>}
+          <div className="scan-market-list">{markets?.map((market) => { const forecast = forecastByTicker.get(market.ticker); return <article key={market.ticker}><div><strong>{market.kind}: {market.title}</strong><small>{market.ticker} · {market.phase === 'halftime' ? 'Halftime review only' : 'Pregame review'}</small><small>Indicative YES ask {market.indicativeAsk === null ? 'unavailable' : `${(market.indicativeAsk * 100).toFixed(1)}¢`} · displayed size {market.indicativeSize ?? 'unknown'}</small><small>{forecast?.status === 'MODELED' ? `Experimental YES ${(forecast.probabilityYes! * 100).toFixed(1)}% · NO ${(forecast.probabilityNo! * 100).toFixed(1)}%${forecast.tieProbability ? ` · tie ${(forecast.tieProbability * 100).toFixed(1)}% (half payout)` : ''} · ${forecast.modelVersion} · ${forecast.modelSource ?? 'source unknown'} · ${forecast.trainingGames} past games` : `Unrated: ${forecast?.reason ?? 'forecast unavailable'}`}</small><details><summary>Contract rules</summary><p>{market.rules || 'Not available: abstain'}</p></details></div><button type="button" onClick={() => void inspect(market.ticker)}>Inspect book</button></article> })}</div>
+        </details>
+      })}
       {visible.markets.length === 0 && <p className="help">No listed NFL contracts for this day. No pick.</p>}
     </>}
     {quote && <div className="quote-panel"><h3>{quote.ticker}</h3><p>Orderbook observed {new Date(quote.observedAt).toLocaleString()} · {quote.quantity} contracts requested. Fee estimate assumes general taker multiplier 1; verify the actual series schedule and resolution rules. Prices are NOT independent win probabilities or guaranteed fills.</p><p>YES: {quote.yes ? `${(quote.yes.estimatedAllIn * 100).toFixed(2)}¢ estimated all-in` : 'insufficient depth'} · NO: {quote.no ? `${(quote.no.estimatedAllIn * 100).toFixed(2)}¢ estimated all-in` : 'insufficient depth'}</p></div>}

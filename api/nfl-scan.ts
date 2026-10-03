@@ -1,6 +1,12 @@
 import { verifySessionToken } from './auth-core.js'
 import { collectDailyMarkets, NFL_SERIES, quoteForSize } from './nfl-core.js'
-import { forecastMarkets } from './nfl-forecast.js'
+import { forecastMarkets, gameCode } from './nfl-forecast.js'
+import { parseEspnOdds } from './nfl-bookmaker.js'
+import { parseGamesCsv, parseScheduleCsv } from './nfl-model.js'
+import { matchupContext, type EfficiencySnapshot } from './nfl-efficiency.js'
+import { refreshEfficiency } from './nfl-live-efficiency.js'
+import { fetchPreseason, weightedTeamForm } from './nfl-preseason.js'
+import efficiencySnapshot from './data/nfl-efficiency.json' with { type: 'json' }
 
 type Request = { method?: string; headers?: { cookie?: string }; query?: { date?: string | string[]; ticker?: string | string[]; quantity?: string | string[]; forecast?: string | string[] } }
 type Response = { setHeader: (name: string, value: string) => void; status: (code: number) => { json: (body: unknown) => void } }
@@ -45,7 +51,31 @@ export default async function handler(request: Request, response: Response): Pro
     if (!upstream.ok) throw new Error('Historical game data unavailable')
     const csv = await upstream.text()
     if (csv.length > 8_000_000) throw new Error('Historical game data too large')
-    response.status(200).json({ ...scan, forecasts: forecastMarkets(scan.markets, csv, date), modelSource: source, modelFetchedAt: new Date().toISOString() })
+    const completed = parseGamesCsv(csv).filter((game) => game.date < date)
+    const latestCompleted = completed.reduce((latest, game) => game.date > latest ? game.date : latest, '')
+    const efficiencyTask = refreshEfficiency(efficiencySnapshot as EfficiencySnapshot, completed, date)
+    const preseasonTask = fetchPreseason(date)
+    const oddsSource = `https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard?dates=${date.replaceAll('-', '')}`
+    let bookmakerLines: ReturnType<typeof parseEspnOdds> = []
+    let bookmakerStatus = 'unavailable'
+    try {
+      const oddsResponse = await fetch(oddsSource, { signal: AbortSignal.timeout(10000) })
+      if (oddsResponse.ok) {
+        bookmakerLines = parseEspnOdds(await oddsResponse.json(), date, new Date().toISOString())
+        bookmakerStatus = bookmakerLines.length ? 'observed' : 'no valid pregame odds'
+      }
+    } catch { /* No sportsbook probability is inferred from Kalshi when external odds fail. */ }
+    const [efficiency, preseason] = await Promise.all([efficiencyTask, preseasonTask])
+    const contexts = parseScheduleCsv(csv, date).map((game) => ({ event: gameCode(date, game.away, game.home), home: game.home, away: game.away,
+      context: efficiency.snapshot ? matchupContext(efficiency.snapshot, game.home, game.away, date, latestCompleted) : null,
+      homeForm: weightedTeamForm(completed, preseason.games, game.home, date),
+      awayForm: weightedTeamForm(completed, preseason.games, game.away, date) }))
+    response.status(200).json({ ...scan, forecasts: forecastMarkets(scan.markets, csv, date, bookmakerLines),
+      modelSource: source, modelFetchedAt: new Date().toISOString(), bookmakerLines, bookmakerSource: oddsSource,
+      bookmakerStatus, contexts, efficiencyStatus: efficiency.status,
+      efficiencySnapshotThrough: efficiency.snapshot?.lastGameDate ?? null,
+      efficiencySources: efficiency.snapshot?.sources ?? [], preseasonStatus: preseason.status,
+      preseasonObservedAt: preseason.observedAt, preseasonSources: preseason.sources, preseasonGames: preseason.games })
   }
   catch { response.status(502).json({ error: 'Kalshi daily scan incomplete; no partial slate returned' }) }
 }

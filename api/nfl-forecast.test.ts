@@ -40,3 +40,14 @@ it('recognizes displayed LA and NY prefixes without changing the team token', ()
     title: 'LA Chargers wins by over 3.5 points?', rules: 'LA Chargers wins by more than 3.5 points' }
   expect(forecastMarkets([market], laCsv, '2026-10-04')[0].status).toBe('MODELED')
 })
+
+it('uses a distinct independent sportsbook score distribution when matching pregame odds exist', () => {
+  const market = m('KXNFLTOTAL', '49', 'Full Game: over 48.5 points scored?')
+  const marketCsv = csv.replace('game_type,gameday,home_team,away_team,home_score,away_score',
+    'game_type,gameday,home_team,away_team,home_score,away_score,spread_line,total_line')
+    .replaceAll(/,(\d+),(\d+)\n/g, ',$1,$2,3.5,45.5\n')
+  const lines = [{ home: 'CIN', away: 'JAX', homeSpread: -5.5, total: 51.5, provider: 'Draft Kings', eventId: '401', kickoff: '2026-10-04T17:00:00Z', observedAt: '2026-10-02T12:00:00Z' }]
+  const result = forecastMarkets([market], marketCsv, '2026-10-04', lines)[0]
+  expect(result).toMatchObject({ status: 'MODELED', modelVersion: 'sportsbook-score-v2', modelSource: 'Draft Kings via ESPN' })
+  expect(result.probabilityYes).not.toEqual(forecastMarkets([market], csv, '2026-10-04')[0].probabilityYes)
+})

@@ -3,7 +3,7 @@ export type CompletedGame = { date: string; home: string; away: string; homeScor
 export type ScoreForecast = { samples: [number, number][]; projectedHome: number; projectedAway: number; trainingGames: number }
 export type ScoreModel = { games: CompletedGame[]; homeMean: number; awayMean: number; leagueMean: number }
 
-function csvRows(text: string): string[][] {
+export function csvRows(text: string): string[][] {
   const rows: string[][] = []; let row: string[] = []; let field = ''; let quoted = false
   for (let i = 0; i < text.length; i++) {
     const ch = text[i]
