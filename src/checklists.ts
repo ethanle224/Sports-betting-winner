@@ -17,6 +17,8 @@ export type PaperCandidate = {
   confidenceRationale?: string
   modelSource?: string
   modelObservedAt?: string
+  pregameThesis?: string
+  quoteSource?: string
 }
 
 export const PAPER_BANKROLL = 1000

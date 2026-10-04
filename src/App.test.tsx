@@ -10,6 +10,16 @@ vi.mock('./auth', () => ({
 }))
 
 describe('Edgeboard dashboard', () => {
+  function settle(row: HTMLElement, outcome: string, source = 'https://example.com/official-result') {
+    fireEvent.click(within(row).getByText('Settle / review'))
+    fireEvent.change(within(row).getByLabelText('Result'), { target: { value: outcome } })
+    fireEvent.change(within(row).getByLabelText('Settlement source'), { target: { value: source } })
+    if (outcome === 'loss') {
+      fireEvent.change(within(row).getByLabelText('Loss diagnosis'), { target: { value: 'unknown' } })
+      fireEvent.change(within(row).getByLabelText('Postmortem evidence'), { target: { value: 'Needs investigation; no confirmed cause yet' } })
+    }
+    fireEvent.click(within(row).getByRole('button', { name: 'Save settlement' }))
+  }
   beforeEach(() => {
     localStorage.clear()
     vi.mocked(getSession).mockResolvedValue({ authenticated: true, username: 'Admin' })
@@ -98,6 +108,8 @@ describe('Edgeboard dashboard', () => {
     fireEvent.change(screen.getByLabelText('Model win probability (%)'), { target: { value: '64' } })
     fireEvent.change(screen.getByLabelText('Independent model source / method'), { target: { value: 'Independent injury-adjusted forecast v1' } })
     fireEvent.change(screen.getByLabelText('Model calculated at'), { target: { value: new Date(quote.getTime() - quote.getTimezoneOffset() * 60_000).toISOString().slice(0, 16) } })
+    fireEvent.change(screen.getByLabelText('Pregame thesis & risks'), { target: { value: 'Red health risk; price only valid at this line' } })
+    fireEvent.change(screen.getByLabelText('Quote / rule evidence source'), { target: { value: 'Market contract and book snapshot' } })
     fireEvent.change(screen.getByLabelText('Independent probability (%)'), { target: { value: '62' } })
     fireEvent.change(screen.getByLabelText('Independent source'), { target: { value: 'Sharp quote' } })
     fireEvent.change(screen.getByLabelText('Dollar share on our side (%)'), { target: { value: '80' } })
@@ -109,9 +121,11 @@ describe('Edgeboard dashboard', () => {
     const row = screen.getByRole('row', { name: /Blue @ Red/ })
     expect(within(row).getAllByText('PAPER')).toHaveLength(2)
     expect(within(row).getByText('REJECT')).toBeInTheDocument()
-    fireEvent.click(within(row).getByRole('button', { name: 'Mark win' }))
+    expect(within(row).getByText(/Pregame: Red health risk/)).toBeInTheDocument()
+    settle(row, 'win')
     expect(screen.getByText(/2 eligible strategies/)).toBeInTheDocument()
     expect(JSON.parse(localStorage.getItem('edgeboard-paper-v1') || '[]')).toHaveLength(1)
+    expect(JSON.parse(localStorage.getItem('edgeboard-paper-v1') || '[]')[0].candidate.quoteSource).toBe('Market contract and book snapshot')
   })
 
   it('restores saved paper snapshots after remount', async () => {
@@ -141,8 +155,8 @@ describe('Edgeboard dashboard', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Log paper snapshot' }))
     const row = screen.getByRole('row', { name: /Blue @ Red/ })
     expect(within(row).getByText(/0.50 units · 22 contracts · \$12.10 staked/)).toBeInTheDocument()
-    fireEvent.click(within(row).getByRole('button', { name: 'Mark win' }))
-    expect(screen.getByText('+$9.90')).toBeInTheDocument()
+    settle(row, 'win')
+    expect(screen.getAllByText('+$9.90').length).toBeGreaterThan(0)
     const saved = JSON.parse(localStorage.getItem('edgeboard-paper-v1') || '[]')
     expect(saved[0].contracts).toBe(22)
     expect(saved[0].candidate.units).toBe(0.5)
@@ -156,7 +170,45 @@ describe('Edgeboard dashboard', () => {
     }, results: [{ id: 'value', status: 'PAPER', reasons: [], payoutMultiple: 1 / 0.55 }] }]))
     render(<App />)
     expect(await screen.findByText('Legacy match')).toBeInTheDocument()
-    expect(screen.getByText('+$4.50')).toBeInTheDocument()
+    expect(screen.getAllByText('+$4.50').length).toBeGreaterThan(0)
+  })
+
+  it('offers a local JSON download of the current audit record', async () => {
+    const create = vi.fn().mockReturnValue('blob:test')
+    Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: create })
+    Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: vi.fn() })
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
+    render(<App />)
+    await screen.findByText('A · Value baseline')
+    fireEvent.click(screen.getByRole('button', { name: 'Download audit JSON' }))
+    expect(create).toHaveBeenCalledWith(expect.any(Blob))
+    expect(click).toHaveBeenCalledOnce()
+    expect((click.mock.instances[0] as HTMLAnchorElement).download).toBe('edgeboard-paper-log.json')
+    click.mockRestore()
+  })
+
+  it('requires sourced settlement and logs a loss review with a visible cause count and revision history', async () => {
+    localStorage.setItem('edgeboard-paper-v1', JSON.stringify([{ id: 'saved', outcome: 'pending', candidate: {
+      matchup: 'Blue @ Red', contract: 'GAME-RED', side: 'YES', observedAt: '2026-10-02T12:00:00Z',
+      allInCost: 0.55, modelProbability: 0.64, modelSource: 'sportsbook-score-v2',
+    }, contracts: 20, results: [{ id: 'value', status: 'PAPER', reasons: [], payoutMultiple: 1 / 0.55 }] }]))
+    render(<App />)
+    const row = await screen.findByRole('row', { name: /Blue @ Red/ })
+    fireEvent.click(within(row).getByText('Settle / review'))
+    fireEvent.change(within(row).getByLabelText('Result'), { target: { value: 'loss' } })
+    fireEvent.click(within(row).getByRole('button', { name: 'Save settlement' }))
+    expect(within(row).getByRole('alert')).toHaveTextContent(/settlement source/i)
+    fireEvent.change(within(row).getByLabelText('Settlement source'), { target: { value: 'Official contract result' } })
+    fireEvent.change(within(row).getByLabelText('Loss diagnosis'), { target: { value: 'data' } })
+    fireEvent.change(within(row).getByLabelText('Postmortem evidence'), { target: { value: 'Lineup update arrived after snapshot' } })
+    fireEvent.click(within(row).getByRole('button', { name: 'Save settlement' }))
+    const review = screen.getByRole('heading', { name: 'Outcome & model review' }).closest('section')!
+    expect(within(review).getByText('Stale/missing lineup or evidence').parentElement).toHaveTextContent('1')
+    const saved = JSON.parse(localStorage.getItem('edgeboard-paper-v1') || '[]')[0]
+    expect(saved.history).toHaveLength(1)
+    expect(saved.history[0].review.reason).toBe('data')
+    expect(saved.candidate.modelProbability).toBe(0.64)
+    expect(within(screen.getByRole('row', { name: /Blue @ Red/ })).getByText(/-\$11\.00/)).toBeInTheDocument()
   })
 
   it('logs out through the server and returns to the login screen', async () => {

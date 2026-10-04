@@ -8,9 +8,9 @@ Its job is to record the same pre-event market snapshot through fixed checklists
 
 ## Current product boundary
 
-- Manual, browser-local paper ledger.
-- Signed-in, read-only public Kalshi market and orderbook API; no live score feed. The current v2 forecast work is local until separately deployed.
-- No account access, real orders, account balance, or automatic settlement.
+- Manual, browser-local paper ledger with sourced result entry, post-settlement review hypotheses, revision history, and JSON backup export. Not tamper-proof, server-backed, automatically settled, or synchronized.
+- Signed-in, read-only public Kalshi market and orderbook API; no live score feed. Production release status must be verified against the Git/Vercel deployment before use.
+- No account access, real orders, account balance, or automatic settlement. Scanner evidence is not automatically linked to manual ledger entries.
 - Browser `localStorage` retains entries locally; clearing browser data removes them.
 - The GitHub/Vercel UI must not contain passwords, private keys, API keys, or other secret values.
 
@@ -72,8 +72,8 @@ For each day’s NFL slate, assess both sides where available for:
 ### After settlement
 
 - [ ] Resolve each paper entry from the contract’s official rules.
-- [ ] Track settled sample size, net paper P&L, drawdown, and forecast calibration per strategy.
-- [ ] Classify losses: price, probability estimate, stale/incomplete data, rule mismatch, fill assumption, or variance.
+- [x] Track settled sample size, net paper P&L, and binary-outcome Brier calibration per strategy; drawdown is still unimplemented.
+- [x] Review losses with sourced results, a dated note, and a tentative category: price/execution, probability, stale/incomplete data, rule mismatch, exposure, variance hypothesis, or unknown.
 - [ ] Change a rule only for a repeated, testable failure; version the new rule and test on future events.
 
 ## Login plan
