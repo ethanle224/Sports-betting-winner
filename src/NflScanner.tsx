@@ -4,6 +4,7 @@ import type { MarketForecast } from '../server/nfl-forecast'
 import type { BookmakerLine } from '../server/nfl-bookmaker'
 import type { MatchupContext } from '../server/nfl-efficiency'
 import type { WeightedTeamForm } from '../server/nfl-preseason'
+import type { PaperEntry } from './paper-log'
 
 type DailyScan = { date: string; collectedAt: string; coverage: { complete: boolean; count: number };
   series: { ticker: string; kind: string; phase: string; count: number }[]; markets: ScannedMarket[];
@@ -24,7 +25,7 @@ function savedScans(): DailyScan[] {
   catch { return [] }
 }
 
-export default function NflScanner() {
+export default function NflScanner({ entries }: { entries: PaperEntry[] }) {
   const [date, setDate] = useState(() => new Intl.DateTimeFormat('sv-SE', { timeZone: 'America/Los_Angeles', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date()))
   const [history, setHistory] = useState<DailyScan[]>(savedScans)
   const [scan, setScan] = useState<DailyScan | null>(null)
@@ -64,6 +65,18 @@ export default function NflScanner() {
 
   const visible = scan ?? history.find((item) => item.date === date) ?? null
   const forecastByTicker = new Map(visible?.forecasts?.map((item) => [item.ticker, item]) ?? [])
+  const marketByTicker = new Map(visible?.markets.map((item) => [item.ticker, item]) ?? [])
+  const picks = entries.filter((entry) => entry.results.some((result) => result.status === 'PAPER') &&
+    marketByTicker.get(entry.candidate.contract)?.gameDate === date)
+  const leads = (visible?.markets ?? []).flatMap((market) => {
+    const forecast = forecastByTicker.get(market.ticker)
+    const ask = market.indicativeAsk
+    if (market.phase !== 'pregame' || forecast?.status !== 'MODELED' || !['sportsbook-score-v2', 'sportsbook-score-v3-winner'].includes(forecast.modelVersion ?? '') ||
+      ask === null || ask <= 0 || ask > 1 / 1.7 || forecast.probabilityYes === null || forecast.probabilityYes === undefined ||
+      !Number.isFinite(forecast.probabilityYes) || forecast.probabilityYes - ask < 0.05 ||
+      picks.some((entry) => entry.candidate.contract === market.ticker)) return []
+    return [{ market, probability: forecast.probabilityYes, grossEdge: forecast.probabilityYes - ask }]
+  }).sort((a, b) => b.grossEdge - a.grossEdge).slice(0, 5)
   const grouped = (visible?.markets ?? []).reduce<Record<string, ScannedMarket[]>>((acc, item) => {
     const game = item.eventTicker.replace(/^KXNFL(?:GAME|SPREAD|TOTAL|1H(?:SPREAD|TOTAL)?|2H(?:SPREAD|TOTAL)?)-/, '')
     ;(acc[game] ??= []).push(item)
@@ -74,13 +87,30 @@ export default function NflScanner() {
     <p className="help">Scan every listed contract across nine NFL market families. An independent sportsbook spread/total anchors available exact pregame winner, spread, and total forecasts; the older scores-only baseline is labeled separately when odds are missing. Halves are unrated. Updated football efficiency and current-season-first form (with low-weight preseason games) are context, not probability adjustments. Neither forecast is a validated edge or paper pick. Inspect depth for ONE contract at the intended size; indicative asks are not fills.</p>
     <div className="scan-controls"><label>NFL game date <input type="date" value={date} onChange={(event) => { setDate(event.target.value); setScan(null); setQuote(null) }} /></label><button className="primary" type="button" disabled={busy} onClick={() => void run()}>{busy ? 'Scanning…' : 'Scan NFL day'}</button></div>
     {error && <p role="alert">{error}</p>}
+    <section className="pick-zone" aria-labelledby="paper-picks-heading">
+      <p className="eyebrow">DECISION / PAPER ONLY</p><h3 id="paper-picks-heading">Paper picks for this slate</h3>
+      {picks.length ? <div className="pick-list">{picks.map((entry) => <article key={entry.id}>
+        <span className="pick-status">LOGGED PAPER PICK · {entry.outcome.toUpperCase()}</span>
+        <strong>{entry.candidate.matchup}</strong><span>{entry.candidate.contract} · {entry.candidate.side}</span>
+        <span>Frozen {(entry.candidate.allInCost * 100).toFixed(2)}¢ all-in · {(entry.candidate.modelProbability * 100).toFixed(1)}% model · {entry.results.filter((result) => result.status === 'PAPER').map((result) => result.name ?? result.id).join(', ')}</span>
+        <p>{entry.candidate.pregameThesis?.trim() || 'Pregame reason missing from this logged snapshot; do not infer one afterward.'}</p>
+      </article>)}</div> : <p>No logged paper picks for this slate. {visible ? 'A scan alone does not approve a bet; complete the quote, rules, news and strategy checklist below.' : 'Scan the selected date to match logged contract tickers.'}</p>}
+    </section>
     {visible && <>
       <p className="help">Complete scan from {new Date(visible.collectedAt).toLocaleString()} · {visible.coverage.count} listed contracts · {Object.keys(grouped).length} events. Stored in this browser only; prices age immediately.</p>
       <p className="help">{visible.forecasts ? `${visible.forecasts.filter((item) => item.status === 'MODELED').length} experimental pregame forecasts · ${visible.forecasts.filter((item) => item.status === 'UNRATED').length} unrated.` : 'Older scan: no independent forecasts.'} No automatic paper picks: model has not beaten archived bookmaker odds in walk-forward testing. No A/B/C pass is claimed without verified executable quotes and independent consensus.</p>
+      <div className="scan-controls"><label>Quote size (whole contracts) <input type="number" min="1" max="1000" step="1" value={quantity} onChange={(event) => setQuantity(Number(event.target.value))} /></label></div>
+      <section className="lead-zone" aria-labelledby="worth-checking-heading"><h3 id="worth-checking-heading">Worth checking</h3>
+        <p className="help">Indicative only — not a pick. Highest apparent YES gaps from sportsbook-anchored full-game forecasts (up to five). These use displayed asks, not executable depth or fees. A big gap can disappear when the book is checked. Confirm rules, injury news, freshness and the full checklist before logging a paper pick.</p>
+        {leads.length ? <div className="lead-list">{leads.map(({ market, probability, grossEdge }) => <article key={market.ticker}>
+          <div><strong>{market.title}</strong><small>{market.eventTicker} · {market.ticker}</small><span>{(probability * 100).toFixed(1)}% model · {(market.indicativeAsk! * 100).toFixed(1)}¢ displayed YES ask · {(grossEdge * 100).toFixed(1)}pp gross gap</span></div>
+          <button type="button" onClick={() => void inspect(market.ticker)} aria-label={`Inspect book for ${market.title}`}>Inspect book</button>
+        </article>)}</div> : <p className="help">No indicative YES leads clear the gross screen. That does not rule in NO sides or imply a verified pick.</p>}
+        {quote && leads.some(({ market }) => market.ticker === quote.ticker) && <div className="lead-quote"><strong>{quote.ticker}</strong><p>Book at {new Date(quote.observedAt).toLocaleString()} for {quote.quantity} contracts: YES {quote.yes ? `${(quote.yes.estimatedAllIn * 100).toFixed(2)}¢ all-in estimate` : 'insufficient depth'} · NO {quote.no ? `${(quote.no.estimatedAllIn * 100).toFixed(2)}¢ all-in estimate` : 'insufficient depth'}. Fee estimate assumes general taker multiplier 1. Recheck rules, series fees, news and the full checklist; this is not a paper pick.</p></div>}
+      </section>
       {visible.bookmakerStatus && <p className="help">External sportsbook odds: {visible.bookmakerStatus}. ESPN gives no quote-update time here; collection time does not prove odds freshness. {visible.bookmakerSource && <a href={visible.bookmakerSource} target="_blank" rel="noreferrer">Source</a>}</p>}
       {visible.efficiencyStatus && <p className="help">Efficiency {visible.efficiencyStatus}{visible.efficiencySnapshotThrough ? ` through ${visible.efficiencySnapshotThrough}` : ': latest completed-game source unavailable; stale stats hidden'}. Final scores and sportsbook odds are checked afresh with each scan.</p>}
       {visible.preseasonStatus && <p className="help">Preseason results: {visible.preseasonStatus}. Only completed games known before the selected date count; preseason scores are weaker evidence because rosters and play-calling can differ. {visible.preseasonSources?.[0] && <a href={visible.preseasonSources[0]} target="_blank" rel="noreferrer">Source</a>}</p>}
-      <div className="scan-controls"><label>Quote size (whole contracts) <input type="number" min="1" max="1000" step="1" value={quantity} onChange={(event) => setQuantity(Number(event.target.value))} /></label></div>
       <div className="series-grid">{visible.series.map((item) => <span key={item.ticker}>{item.kind} <b>{item.count}</b></span>)}</div>
       {Object.entries(grouped).map(([event, markets]) => {
         const matchup = visible.contexts?.find((item) => item.event === event)
@@ -101,6 +131,6 @@ export default function NflScanner() {
       })}
       {visible.markets.length === 0 && <p className="help">No listed NFL contracts for this day. No pick.</p>}
     </>}
-    {quote && <div className="quote-panel"><h3>{quote.ticker}</h3><p>Orderbook observed {new Date(quote.observedAt).toLocaleString()} · {quote.quantity} contracts requested. Fee estimate assumes general taker multiplier 1; verify the actual series schedule and resolution rules. Prices are NOT independent win probabilities or guaranteed fills.</p><p>YES: {quote.yes ? `${(quote.yes.estimatedAllIn * 100).toFixed(2)}¢ estimated all-in` : 'insufficient depth'} · NO: {quote.no ? `${(quote.no.estimatedAllIn * 100).toFixed(2)}¢ estimated all-in` : 'insufficient depth'}</p></div>}
+    {quote && !leads.some(({ market }) => market.ticker === quote.ticker) && <div className="quote-panel"><h3>{quote.ticker}</h3><p>Orderbook observed {new Date(quote.observedAt).toLocaleString()} · {quote.quantity} contracts requested. Fee estimate assumes general taker multiplier 1; verify the actual series schedule and resolution rules. Prices are NOT independent win probabilities or guaranteed fills.</p><p>YES: {quote.yes ? `${(quote.yes.estimatedAllIn * 100).toFixed(2)}¢ estimated all-in` : 'insufficient depth'} · NO: {quote.no ? `${(quote.no.estimatedAllIn * 100).toFixed(2)}¢ estimated all-in` : 'insufficient depth'}</p></div>}
   </section>
 }

@@ -27,7 +27,8 @@ export function forecastMarkets(markets: ScannedMarket[], csv: string, date: str
     if (matches.length !== 1) return unavailable(ticker, 'Game identity ambiguous or missing from schedule')
     const game = matches[0]
     const odds = bookmakerLines.filter((line) => line.home === game.home && line.away === game.away)
-    const independent = odds.length === 1 ? forecastFromSportsbook(archived, odds[0], date) : null
+    // Retrospective winner-only window probe: do not shorten spread/total residuals.
+    const independent = odds.length === 1 ? forecastFromSportsbook(archived, odds[0], date, series === 'KXNFLGAME' ? 384 : 512) : null
     const forecast = independent ?? (model && forecastGame(model, game.home, game.away))
     if (!forecast) return unavailable(ticker, 'Team history insufficient')
     const suffix = ticker.slice(eventTicker.length + 1)
@@ -53,7 +54,7 @@ export function forecastMarkets(markets: ScannedMarket[], csv: string, date: str
     return { ticker, status: 'MODELED', reason: 'Experimental score baseline; not a validated edge or paper pick',
       probabilityYes: yes, probabilityNo: 1 - yes - tie, tieProbability: tie,
       projectedHome: forecast.projectedHome, projectedAway: forecast.projectedAway,
-      trainingGames: forecast.trainingGames, modelVersion: independent ? 'sportsbook-score-v2' : 'pregame-score-v1',
+      trainingGames: forecast.trainingGames, modelVersion: independent ? series === 'KXNFLGAME' ? 'sportsbook-score-v3-winner' : 'sportsbook-score-v2' : 'pregame-score-v1',
       modelSource: independent ? `${odds[0].provider} via ESPN` : 'nflverse completed scores',
       modelObservedAt: independent ? odds[0].observedAt : undefined }
   })

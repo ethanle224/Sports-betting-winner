@@ -30,11 +30,56 @@ describe('Edgeboard dashboard', () => {
   it('shows three predeclared checklists without fabricated picks', async () => {
     render(<App />)
     expect(await screen.findByText('A · Value baseline')).toBeInTheDocument()
+    expect(screen.getByRole('region', { name: 'Paper picks for this slate' })).toHaveTextContent('No logged paper picks for this slate')
     expect(screen.getByText('B · Independent consensus')).toBeInTheDocument()
     expect(screen.getByText('C · Crowd caution')).toBeInTheDocument()
     expect(screen.getByText('No candidates logged yet.')).toBeInTheDocument()
     expect(screen.getByLabelText('Independent model source / method')).toBeInTheDocument()
     expect(screen.getByLabelText('Model calculated at')).toBeInTheDocument()
+  })
+
+  it('separates indicative leads from logged paper picks', async () => {
+    const ticker = 'KXNFLGAME-26OCT04INDWAS-IND'
+    const payload = { date: '2026-10-04', collectedAt: '2026-10-04T10:00:00Z', coverage: { complete: true, count: 1 },
+      series: Array.from({ length: 9 }, (_, n) => ({ ticker: `S${n}`, kind: 'Game winner', phase: 'pregame', count: n === 0 ? 1 : 0 })),
+      markets: [{ series: 'KXNFLGAME', kind: 'Game winner', phase: 'pregame', gameDate: '2026-10-04', eventTicker: 'KXNFLGAME-26OCT04INDWAS', ticker, title: 'Indianapolis wins', rules: 'Winner at full time', indicativeAsk: 0.5, indicativeSize: 60 }],
+      forecasts: [{ ticker, status: 'MODELED', probabilityYes: 0.62, probabilityNo: 0.38, modelVersion: 'sportsbook-score-v3-winner', modelSource: 'Independent odds' }] }
+    const fetcher = vi.spyOn(globalThis, 'fetch').mockResolvedValue({ ok: true, json: async () => payload } as Response)
+    render(<App />)
+    await screen.findByText('A · Value baseline')
+    fireEvent.change(screen.getByLabelText('NFL game date'), { target: { value: '2026-10-04' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Scan NFL day' }))
+    const leads = await screen.findByRole('region', { name: 'Worth checking' })
+    expect(within(leads).getByText('Indianapolis wins')).toBeInTheDocument()
+    expect(within(leads).getByText(/Indicative only.*not a pick/i)).toBeInTheDocument()
+    expect(within(leads).getByText(/12\.0pp gross/i)).toBeInTheDocument()
+    expect(within(leads).getByRole('button', { name: 'Inspect book for Indianapolis wins' })).toBeInTheDocument()
+    expect(screen.getByRole('region', { name: 'Paper picks for this slate' })).toHaveTextContent('No logged paper picks for this slate')
+    fetcher.mockRestore()
+  })
+
+  it('only puts logged PAPER decisions for this slate in the pick section with their original reason', async () => {
+    const ticker = 'KXNFLGAME-26OCT04INDWAS-IND'
+    localStorage.setItem('edgeboard-paper-v1', JSON.stringify([
+      { id: 'rejected', outcome: 'pending', candidate: { matchup: 'Rejected', contract: ticker, side: 'YES', pregameThesis: 'Not a pick' }, results: [{ id: 'value', status: 'REJECT', reasons: ['Edge below 5pp'] }] },
+      { id: 'qualified', outcome: 'pending', candidate: { matchup: 'IND @ WAS', contract: ticker, side: 'YES', observedAt: '2026-10-03T23:00:00Z', allInCost: 0.52, modelProbability: 0.63, pregameThesis: 'Independent line favored Indy; quarterback uncertainty remains.' }, results: [{ id: 'value', status: 'PAPER', reasons: [], payoutMultiple: 1.92 }] },
+    ]))
+    const payload = { date: '2026-10-04', collectedAt: '2026-10-04T10:00:00Z', coverage: { complete: true, count: 1 },
+      series: Array.from({ length: 9 }, (_, n) => ({ ticker: `S${n}`, kind: 'Game winner', phase: 'pregame', count: n === 0 ? 1 : 0 })),
+      markets: [{ series: 'KXNFLGAME', kind: 'Game winner', phase: 'pregame', gameDate: '2026-10-04', eventTicker: 'KXNFLGAME-26OCT04INDWAS', ticker, title: 'Indianapolis wins', rules: 'Winner at full time', indicativeAsk: 0.5, indicativeSize: 60 }],
+      forecasts: [{ ticker, status: 'MODELED', probabilityYes: 0.62, modelVersion: 'sportsbook-score-v2' }] }
+    const fetcher = vi.spyOn(globalThis, 'fetch').mockResolvedValue({ ok: true, json: async () => payload } as Response)
+    render(<App />)
+    await screen.findByText('A · Value baseline')
+    fireEvent.change(screen.getByLabelText('NFL game date'), { target: { value: '2026-10-04' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Scan NFL day' }))
+    const picks = screen.getByRole('region', { name: 'Paper picks for this slate' })
+    expect(await within(picks).findByText('IND @ WAS')).toBeInTheDocument()
+    expect(within(picks).getByText('Independent line favored Indy; quarterback uncertainty remains.')).toBeInTheDocument()
+    expect(within(picks).getByText(/Frozen 52\.00¢ all-in.*63\.0% model/)).toBeInTheDocument()
+    expect(within(picks).queryByText('Rejected')).not.toBeInTheDocument()
+    expect(within(screen.getByRole('region', { name: 'Worth checking' })).queryByText('Indianapolis wins')).not.toBeInTheDocument()
+    fetcher.mockRestore()
   })
 
   it('scans an NFL day across nine series without inventing a pick', async () => {

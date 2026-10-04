@@ -51,3 +51,15 @@ it('uses a distinct independent sportsbook score distribution when matching preg
   expect(result).toMatchObject({ status: 'MODELED', modelVersion: 'sportsbook-score-v2', modelSource: 'Draft Kings via ESPN' })
   expect(result.probabilityYes).not.toEqual(forecastMarkets([market], csv, '2026-10-04')[0].probabilityYes)
 })
+
+it('uses a shorter strictly prior residual window only for full-game winner forecasts', () => {
+  const dated = 'game_type,gameday,home_team,away_team,home_score,away_score,spread_line,total_line\n' +
+    Array.from({ length: 400 }, (_, i) => `REG,${new Date(Date.UTC(2024, 0, 1 + i)).toISOString().slice(0, 10)},CIN,JAX,${i < 16 ? 35 : 21},${i < 16 ? 7 : 20},3.5,44.5`).join('\n') +
+    '\nREG,2026-10-04,CIN,JAX,,,,\n'
+  const line = { home: 'CIN', away: 'JAX', homeSpread: -3.5, total: 44.5, provider: 'Draft Kings', eventId: '401', kickoff: '2026-10-04T17:00:00Z', observedAt: '2026-10-02T12:00:00Z' }
+  const winner = m('KXNFLGAME', 'CIN', 'Cincinnati wins', 'If Cincinnati wins, resolves to Yes')
+  const total = m('KXNFLTOTAL', '45', 'Full Game: over 44.5 points scored?')
+  const [winForecast, totalForecast] = forecastMarkets([winner, total], dated, '2026-10-04', [line])
+  expect(winForecast).toMatchObject({ status: 'MODELED', modelVersion: 'sportsbook-score-v3-winner', trainingGames: 384 })
+  expect(totalForecast).toMatchObject({ status: 'MODELED', modelVersion: 'sportsbook-score-v2', trainingGames: 400 })
+})

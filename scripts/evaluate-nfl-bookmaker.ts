@@ -30,7 +30,7 @@ const logLoss = (pairs: [number, number][]) => sum(pairs.map(([p, actual]) => {
 })) / pairs.length
 const result: Record<string, unknown> = {}
 for (const year of ['2024', '2025', '2026']) {
-  const modelScores: [number, number][] = [], bookScores: [number, number][] = [], oddsScores: [number, number][] = []
+  const modelScores: [number, number][] = [], bookScores: [number, number][] = [], recentWinnerScores: [number, number][] = [], oddsScores: [number, number][] = []
   const spreads: [number, number][] = [], totals: [number, number][] = []
   let trainingDate = '', scoreModel: ReturnType<typeof fitScoreModel> = null
   for (const game of games.filter((row) => at(row, 'season') === year)) {
@@ -41,19 +41,21 @@ for (const year of ['2024', '2025', '2026']) {
     const line: BookmakerLine = { home, away, homeSpread: -margin, total,
       provider: 'archived sportsbook', eventId: at(game, 'game_id'), kickoff: date, observedAt: date }
     const independent = forecastFromSportsbook(archived, line, date)
+    const recentWinner = forecastFromSportsbook(archived, line, date, 384)
     const h = Number(at(game, 'home_score')), a = Number(at(game, 'away_score'))
     const homeMoneyline = Number(at(game, 'home_moneyline')), awayMoneyline = Number(at(game, 'away_moneyline'))
-    if (!baseline || !independent || !Number.isFinite(homeMoneyline) || !Number.isFinite(awayMoneyline) || !homeMoneyline || !awayMoneyline) continue
+    if (!baseline || !independent || !recentWinner || !Number.isFinite(homeMoneyline) || !Number.isFinite(awayMoneyline) || !homeMoneyline || !awayMoneyline) continue
     const actual = win(h, a)
     modelScores.push([chance(baseline, win), actual]); bookScores.push([chance(independent, win), actual])
+    recentWinnerScores.push([chance(recentWinner, win), actual])
     const rawHome = implied(homeMoneyline), rawAway = implied(awayMoneyline)
     oddsScores.push([rawHome / (rawHome + rawAway), actual])
     // Main spread/total are historical settlement probes; pushes are excluded, not called losses.
     if (h - a !== margin) spreads.push([chance(independent, (x, y) => x - y > margin ? 1 : x - y === margin ? 0.5 : 0), h - a > margin ? 1 : 0])
     if (h + a !== total) totals.push([chance(independent, (x, y) => x + y > total ? 1 : x + y === total ? 0.5 : 0), h + a > total ? 1 : 0])
   }
-  result[year] = { games: bookScores.length, homeWinBrier: { scoreOnly: brier(modelScores), sportsbookScore: brier(bookScores), sportsbookNoVig: brier(oddsScores) },
-    homeWinLogLoss: { scoreOnly: logLoss(modelScores), sportsbookScore: logLoss(bookScores), sportsbookNoVig: logLoss(oddsScores) },
+  result[year] = { games: bookScores.length, homeWinBrier: { scoreOnly: brier(modelScores), sportsbookScore: brier(bookScores), recentWinner384: brier(recentWinnerScores), sportsbookNoVig: brier(oddsScores) },
+    homeWinLogLoss: { scoreOnly: logLoss(modelScores), sportsbookScore: logLoss(bookScores), recentWinner384: logLoss(recentWinnerScores), sportsbookNoVig: logLoss(oddsScores) },
     mainSpreadBrier: brier(spreads), mainTotalBrier: brier(totals), spreadGames: spreads.length, totalGames: totals.length,
     sportsbookScoreCalibration: Array.from({ length: 5 }, (_, index) => {
       const bin = bookScores.filter(([p]) => p >= index / 5 && (index === 4 ? p <= 1 : p < (index + 1) / 5))
@@ -63,7 +65,7 @@ for (const year of ['2024', '2025', '2026']) {
     }) }
 }
 const report = { source, sha256: createHash('sha256').update(csv).digest('hex'), retrievedAt: new Date().toISOString(),
-  method: 'Regular season, earlier games only; 512 newest paired closing-line score residuals; winner ties count half. Archived lines may be closing odds, not decision-time quotes.',
+  method: 'Regular season, earlier games only; 512 newest paired closing-line score residuals (384 for experimental winner-only revision); winner ties count half. Archived lines may be closing odds, not decision-time quotes. Window compared retrospectively; no live Kalshi edge established.',
   bySeason: result }
 if (process.argv[2]) writeFileSync(process.argv[2], `${JSON.stringify(report, null, 2)}\n`)
 console.log(JSON.stringify(report, null, 2))

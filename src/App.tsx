@@ -113,7 +113,7 @@ function Dashboard({ onLogout }: { onLogout: () => Promise<void> }) {
         </div>
         <aside className="risk-card"><span>PAPER BANKROLL</span><strong>${PAPER_BANKROLL.toLocaleString()}</strong><div>1 unit = ${UNIT_DOLLARS} · 0.00–2.00 units per candidate · $50 maximum intended stake. Paper-only, browser-local ledger.</div></aside>
       </section>
-      <NflScanner />
+      <NflScanner entries={entries} />
       <section className="checklist-grid" aria-label="Paper strategies">
         {STRATEGIES.map((strategy) => {
           const picks = entries.filter((entry) => entry.results.some((result) => result.id === strategy.id && result.status === 'PAPER'))

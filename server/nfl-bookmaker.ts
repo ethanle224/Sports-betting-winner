@@ -50,9 +50,10 @@ export function parseArchivedMarketGamesCsv(csv: string): ArchivedLineGame[] {
   })
 }
 
-export function forecastFromSportsbook(history: ArchivedLineGame[], line: BookmakerLine, date: string): ScoreForecast | null {
+export function forecastFromSportsbook(history: ArchivedLineGame[], line: BookmakerLine, date: string, residualGames = 512): ScoreForecast | null {
+  if (!Number.isInteger(residualGames) || residualGames < 24 || residualGames > 512) return null
   const prior = history.filter((g) => g.date < date && g.date >= `${Number(date.slice(0, 4)) - 2}-01-01`)
-    .sort((a, b) => a.date.localeCompare(b.date)).slice(-512)
+    .sort((a, b) => a.date.localeCompare(b.date)).slice(-residualGames)
   if (prior.length < 24) return null
   const projectedHome = (line.total - line.homeSpread) / 2
   const projectedAway = (line.total + line.homeSpread) / 2
