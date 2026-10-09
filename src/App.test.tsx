@@ -22,9 +22,24 @@ describe('Edgeboard dashboard', () => {
   }
   beforeEach(() => {
     localStorage.clear()
+    localStorage.setItem('edgeboard-active-sport', 'nfl')
     vi.mocked(getSession).mockResolvedValue({ authenticated: true, username: 'Admin' })
     vi.mocked(login).mockResolvedValue({ ok: true })
     vi.mocked(logout).mockResolvedValue(undefined)
+  })
+
+  it('defaults new visitors to isolated NBA research and preserves the NFL ledger behind its tab', async () => {
+    localStorage.removeItem('edgeboard-active-sport')
+    localStorage.setItem('edgeboard-paper-v1', JSON.stringify([{ id: 'old', outcome: 'pending', candidate: {
+      matchup: 'Legacy NFL', contract: 'KXNFLGAME-26OCT04INDWAS-IND', side: 'YES', observedAt: '2026-10-04T08:00:00Z',
+      allInCost: 0.5, modelProbability: 0.6 }, results: [] }]))
+    render(<App />)
+    expect(await screen.findByRole('tab', { name: 'NBA' })).toHaveAttribute('aria-selected', 'true')
+    expect(screen.getByRole('button', { name: 'Scan Kalshi opening slate' })).toBeInTheDocument()
+    expect(screen.queryByText('Legacy NFL')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('tab', { name: 'NFL' }))
+    expect(screen.getByText('Legacy NFL')).toBeInTheDocument()
+    expect(localStorage.getItem('edgeboard-active-sport')).toBe('nfl')
   })
 
   it('shows three predeclared checklists without fabricated picks', async () => {

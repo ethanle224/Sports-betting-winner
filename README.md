@@ -1,6 +1,16 @@
 # Edgeboard — Kalshi Sports Research
 
-A read-only, on-demand NFL market scanner and manual paper-trading ledger for Kalshi sports research.
+A read-only sports research workspace with separate NBA and NFL tabs. The NBA opening-slate scanner and browser-local audit are paper-only; the existing NFL paper ledger stays separate.
+
+## October 19 NBA paper-research runbook
+
+1. Sign in, choose NBA, and scan October 20 near the intended decision time. Check all three mapped games and actual Kalshi winner/spread/total listings; unavailable markets stay unavailable.
+2. Inspect exact contract wording and non-start/fair-price settlement, ten-contract orderbook depth, current fees, and dated injury/expected-lineup reporting. The scores-only forecast is not adjusted numerically for injuries and has no validated betting edge.
+3. For each game, leave the ranked side as `STUDY` or explicitly request a sourced `PAPER_EXPERIMENT` with a written pregame rationale. Freeze the three-game NBA snapshot within 30 minutes of the scan and before tip. No game is forced into an experiment.
+4. Download the NBA audit JSON immediately. The freeze contains raw mapped contracts and inspected books, source times, the independent model, chosen sides and rejection reasons. Storage is browser-local, editable and not synced; keep the exported backup elsewhere.
+5. After settlement, manually inspect the exact Kalshi contract outcome and append a separate sourced review. Simulated net units use the chosen-side payout minus frozen *estimated* all-in cost, at ten contracts and $25 per unit; no fill or profit is asserted.
+
+The scanner only reads public Kalshi endpoints and the signed-in session; it cannot create, amend or cancel real orders. Re-scan October 19/20 before tip because listings, quotes, lineups and fees change. See `NBA_RESEARCH.md` for the model's limitations and the evidence gates. NFL rules and balances do not transfer.
 
 > **Data notice:** The signed-in app has an on-demand, read-only Kalshi NFL discovery/quote API and experimental pregame score forecasts. Available independent sportsbook spread/total lines anchor the newer forecast; football efficiency is shown as context only. The paper ledger still requires manual review, independently verified cost/evidence, and settlement; no automatic picks, scheduled scanner, live score feed, or real orders. Browser localStorage holds up to two daily scan snapshots and 20 inspected raw orderbooks; clearing browser data deletes them. Local changes are not automatically deployed.
 

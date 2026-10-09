@@ -1,0 +1,134 @@
+export const NBA_FREEZE_KEY = 'edgeboard-nba-freezes-v1'
+export const NBA_REVIEW_KEY = 'edgeboard-nba-reviews-v1'
+
+export type NbaEvidence = { requestedPaper: boolean; availabilitySource: string; availabilityObservedAt: string;
+  availabilityNotes: string; rulesSource: string; feeSource: string; uncertaintyAccepted: boolean; rationale: string }
+export type NbaStudySide = { ticker: string; market: string; side: string; line: number | null; probability: number; price: number;
+  feeEstimate: number; allInCost: number; estimatedNetEdge: number; rules: string; rulesSecondary: string }
+export type NbaScanGame = { gameId: string; home: string; away: string; startsAt: string;
+  coverage: { moneyline: number; spread: number; total: number }; qualifiedPaperPick: false;
+  studySide: NbaStudySide | null; forecast: { model: string; [key: string]: unknown } | null;
+  inspected: { ticker: string; source: string; observedAt: string; book: unknown }[];
+  checklist?: { mappedGame: boolean; modelScoreOnly?: boolean; injuryLineupVerified?: boolean; rulesVerified?: boolean;
+    feeVerified?: boolean; executableDepthInspected?: boolean; settlementFairPriceRisk?: boolean } }
+export type NbaScan = { date: string; observedAt: string; marketObservedAt: string; quantity: number; historyObservedAt: string;
+  status: string; games: NbaScanGame[]; sources: Record<string, string>; series: unknown[];
+  marketInventory: unknown[]; [key: string]: unknown }
+export type NbaDecision = { gameId: string; status: 'STUDY' | 'PAPER_EXPERIMENT'; selected: NbaStudySide | null;
+  evidence: NbaEvidence | null; reasons: string[] }
+export type NbaFreeze = { id: string; frozenAt: string; scan: NbaScan; decisions: NbaDecision[] }
+export type NbaReviewInput = { scanId: string; gameId: string; observedAt: string; source: string;
+  outcome: 'YES' | 'NO' | 'FAIR_PRICE'; payout: number; note: string }
+export type NbaReview = NbaReviewInput & { id: string; simulatedNetUnits: number; unitDollars: 25;
+  entryCostPerContract: number; quantity: number; label: 'SIMULATED_NO_FILL' }
+type Storage = Pick<globalThis.Storage, 'getItem' | 'setItem'>
+const IDS = ['401909088', '401909089', '401909090']
+const validUrl = (text: string) => {
+  try { return new URL(text).protocol === 'https:' } catch { return false }
+}
+
+export function freezeNbaStudy(input: NbaScan, evidence: Record<string, NbaEvidence>, nowIso: string): NbaFreeze {
+  const now = Date.parse(nowIso); const observed = Date.parse(input.observedAt)
+  if (input.date !== '2026-10-20' || input.status !== 'STUDY_ONLY_NO_QUALIFIED_PICKS' ||
+    input.quantity !== 10 || !Array.isArray(input.games) || input.games.length !== 3 ||
+    IDS.some((id) => input.games.filter((g) => g.gameId === id).length !== 1) ||
+    !Array.isArray(input.marketInventory) || !Array.isArray(input.series) || !input.sources?.markets || !input.historyObservedAt) {
+    throw new Error('Incomplete three-game NBA scan')
+  }
+  if (!Number.isFinite(now) || !Number.isFinite(observed) || observed > now || now - observed > 30 * 60_000) {
+    throw new Error('NBA scan is stale or from the future')
+  }
+  const listedAt = Date.parse(input.marketObservedAt)
+  if (!Number.isFinite(listedAt) || listedAt > observed || now - listedAt > 30 * 60_000) {
+    throw new Error('NBA market listing is stale or from the future')
+  }
+  if (input.games.some((g) => !Number.isFinite(Date.parse(g.startsAt)) || Date.parse(g.startsAt) <= now || g.qualifiedPaperPick !== false)) {
+    throw new Error('Opening-game tip has passed or scan is malformed')
+  }
+  const decisions: NbaDecision[] = input.games.map((game) => {
+    const submitted = evidence[game.gameId] ?? null
+    const reasons: string[] = []
+    const side = game.studySide
+    if (!side) reasons.push('No priced study side')
+    else {
+      if (!game.forecast || game.forecast.model !== 'nba-scores-v1') reasons.push('Independent score forecast missing')
+      if (!game.inspected?.some((book) => book.ticker === side.ticker && book.book &&
+        Number.isFinite(Date.parse(book.observedAt)) && Date.parse(book.observedAt) >= listedAt &&
+        Date.parse(book.observedAt) <= observed && now - Date.parse(book.observedAt) <= 30 * 60_000)) {
+        reasons.push('Raw sized orderbook missing or stale')
+      }
+      if (!Number.isFinite(side.probability) || side.probability < 0 || side.probability > 1 ||
+        !Number.isFinite(side.allInCost) || side.allInCost <= 0 || side.allInCost >= 1 ||
+        !Number.isFinite(side.estimatedNetEdge) || side.estimatedNetEdge <= 0) reasons.push('No positive post-estimated-cost model gap')
+      if (!side.rules || !side.rulesSecondary) reasons.push('Contract rule text missing')
+    }
+    if (!submitted?.requestedPaper) reasons.push('Paper experiment not requested')
+    const evidenceTime = Date.parse(submitted?.availabilityObservedAt ?? '')
+    if (!submitted || !validUrl(submitted.availabilitySource) || !Number.isFinite(evidenceTime) ||
+      evidenceTime > now || now - evidenceTime > 24 * 60 * 60_000 || submitted.availabilityNotes.trim().length < 20) {
+      reasons.push('Availability and lineup evidence incomplete')
+    }
+    if (!submitted || !validUrl(submitted.rulesSource) || !validUrl(submitted.feeSource)) reasons.push('Rules and fee sources incomplete')
+    if (!submitted?.uncertaintyAccepted || submitted.rationale.trim().length < 20) reasons.push('Pregame rationale and score-only uncertainty incomplete')
+    return { gameId: game.gameId, status: reasons.length === 0 ? 'PAPER_EXPERIMENT' : 'STUDY',
+      selected: side, evidence: submitted, reasons }
+  })
+  // Serialize at the boundary so callers cannot mutate the frozen nested book/model after saving.
+  return JSON.parse(JSON.stringify({ id: input.observedAt, frozenAt: nowIso, scan: input, decisions })) as NbaFreeze
+}
+
+export function readNbaFreezes(storage: Storage): NbaFreeze[] {
+  const text = storage.getItem(NBA_FREEZE_KEY)
+  if (!text) return []
+  try {
+    const value: unknown = JSON.parse(text)
+    if (!Array.isArray(value) || value.some((v) => !v || typeof v.id !== 'string' || !Array.isArray(v.decisions) || v.decisions.length !== 3)) throw new Error('Malformed ledger')
+    return value as NbaFreeze[]
+  } catch { throw new Error('NBA local ledger is corrupt; export/recover it before writing') }
+}
+
+export function appendNbaFreeze(storage: Storage, record: NbaFreeze): NbaFreeze[] {
+  const prior = readNbaFreezes(storage)
+  if (prior.some((item) => item.id === record.id)) throw new Error('Duplicate NBA scan; rescan for a new observation before freezing')
+  const updated = [...prior, record]
+  storage.setItem(NBA_FREEZE_KEY, JSON.stringify(updated))
+  return updated
+}
+
+export function readNbaReviews(storage: Storage): NbaReview[] {
+  const text = storage.getItem(NBA_REVIEW_KEY)
+  if (!text) return []
+  try {
+    const value: unknown = JSON.parse(text)
+    if (!Array.isArray(value) || value.some((v) => !v || typeof v.id !== 'string' || v.label !== 'SIMULATED_NO_FILL')) throw new Error('Malformed review')
+    return value as NbaReview[]
+  } catch { throw new Error('NBA review ledger is corrupt; export/recover it before writing') }
+}
+
+export function appendNbaReview(storage: Storage, input: NbaReviewInput, nowIso = new Date().toISOString()): NbaReview {
+  const frozen = readNbaFreezes(storage).find((item) => item.id === input.scanId)
+  if (!frozen) throw new Error('No frozen NBA scan for review')
+  const decision = frozen.decisions.find((item) => item.gameId === input.gameId)
+  const game = frozen.scan.games.find((item) => item.gameId === input.gameId)
+  if (decision?.status !== 'PAPER_EXPERIMENT' || !decision.selected || !game) throw new Error('No frozen paper experiment for this game')
+  const observed = Date.parse(input.observedAt)
+  if (!Number.isFinite(observed) || observed <= Date.parse(game.startsAt)) throw new Error('Cannot settle before game tip')
+  if (!Number.isFinite(Date.parse(nowIso)) || observed > Date.parse(nowIso)) throw new Error('Review observation cannot be in the future')
+  const source = new URL(input.source)
+  if (source.protocol !== 'https:' || source.hostname !== 'external-api.kalshi.com' ||
+    !source.pathname.includes(decision.selected.ticker)) throw new Error('Exact Kalshi settlement source required')
+  if (!['YES', 'NO', 'FAIR_PRICE'].includes(input.outcome) || !Number.isFinite(input.payout) ||
+    input.payout < 0 || input.payout > 1 ||
+    (input.outcome === 'YES' && input.payout !== (decision.selected.side === 'yes' ? 1 : 0)) ||
+    (input.outcome === 'NO' && input.payout !== (decision.selected.side === 'no' ? 1 : 0)) ||
+    (input.outcome === 'FAIR_PRICE' && (input.payout === 0 || input.payout === 1)) || input.note.trim().length < 15) {
+    throw new Error('Complete settlement outcome, payout and notes required')
+  }
+  const prior = readNbaReviews(storage)
+  const id = `${input.scanId}:${input.gameId}`
+  if (prior.some((review) => review.id === id)) throw new Error('Duplicate NBA settlement review; original decision is immutable')
+  const review: NbaReview = { ...input, id, simulatedNetUnits: (input.payout - decision.selected.allInCost) * frozen.scan.quantity / 25,
+    unitDollars: 25, entryCostPerContract: decision.selected.allInCost, quantity: frozen.scan.quantity, label: 'SIMULATED_NO_FILL' }
+  storage.setItem(NBA_REVIEW_KEY, JSON.stringify([...prior, review]))
+  return review
+}

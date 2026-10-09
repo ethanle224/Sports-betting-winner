@@ -68,6 +68,9 @@ describe('NFL scan endpoint', () => {
     delete process.env.EDGEBOARD_SESSION_SECRET
   })
   it('matches an independent sportsbook line to the exact scanned game without Kalshi as its model', async () => {
+    // A pregame odds fixture must be collected before its kickoff, even when this suite runs later.
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-10-04T12:00:00Z'))
     process.env.EDGEBOARD_SESSION_SECRET = 'test-secret'
     const schedule = 'game_type,gameday,home_team,away_team,home_score,away_score,spread_line,total_line\n' +
       Array.from({ length: 32 }, (_, i) => `REG,2025-09-${String(1 + i % 28).padStart(2, '0')},CIN,JAX,${20 + i % 8},${17 + i % 6},3.5,45.5`).join('\n') +
@@ -80,12 +83,16 @@ describe('NFL scan endpoint', () => {
       : String(input).includes('raw.githubusercontent.com')
       ? ({ ok: true, text: async () => schedule } as Response)
       : ({ ok: true, json: async () => ({ markets: String(input).includes('KXNFLTOTAL') ? [{ event_ticker: 'KXNFLTOTAL-26OCT04JACCIN', ticker: 'KXNFLTOTAL-26OCT04JACCIN-43', title: 'Full Game: over 42.5 points scored?', rules_primary: 'More than 42.5 points' }] : [], cursor: '' }) } as Response))
-    const res = response()
-    await handler({ method: 'GET', query: { date: '2026-10-04', forecast: '1' }, headers: { cookie: `edgeboard_session=${token}` } }, res)
-    expect(res.state.code).toBe(200)
-    expect(res.state.payload).toMatchObject({ forecasts: [{ modelVersion: 'sportsbook-score-v2', modelSource: 'Draft Kings via ESPN' }], bookmakerLines: [{ home: 'CIN', away: 'JAX' }] })
-    fetcher.mockRestore()
-    delete process.env.EDGEBOARD_SESSION_SECRET
+    try {
+      const res = response()
+      await handler({ method: 'GET', query: { date: '2026-10-04', forecast: '1' }, headers: { cookie: `edgeboard_session=${token}` } }, res)
+      expect(res.state.code).toBe(200)
+      expect(res.state.payload).toMatchObject({ forecasts: [{ modelVersion: 'sportsbook-score-v2', modelSource: 'Draft Kings via ESPN' }], bookmakerLines: [{ home: 'CIN', away: 'JAX' }] })
+    } finally {
+      fetcher.mockRestore()
+      delete process.env.EDGEBOARD_SESSION_SECRET
+      vi.useRealTimers()
+    }
   })
   it('refreshes efficiency when completed regular-season games post after the bundled snapshot', async () => {
     process.env.EDGEBOARD_SESSION_SECRET = 'test-secret'

@@ -3,9 +3,12 @@ import { getSession, login, logout } from './auth'
 import { evaluate, paperSize, PAPER_BANKROLL, STRATEGIES, UNIT_DOLLARS, type PaperCandidate } from './checklists'
 import { exportPaperLog, LOSS_REASONS, recordSettlement, summarizePaper, type Outcome, type PaperEntry, type ReviewReason } from './paper-log'
 import NflScanner from './NflScanner'
+import NbaResearch from './NbaResearch'
 import './styles.css'
+import './nba-styles.css'
 
 const STORAGE_KEY = 'edgeboard-paper-v1'
+const SPORT_KEY = 'edgeboard-active-sport'
 
 function loadEntries(): PaperEntry[] {
   try {
@@ -193,6 +196,12 @@ function App() {
   const [session, setSession] = useState<{ authenticated: boolean; username?: string } | null>(null)
   const [message, setMessage] = useState('')
   const [submitting, setSubmitting] = useState(false)
+  const [sport, setSport] = useState<'nba' | 'nfl'>(() => localStorage.getItem(SPORT_KEY) === 'nfl' ? 'nfl' : 'nba')
+
+  function selectSport(next: 'nba' | 'nfl') {
+    setSport(next)
+    try { localStorage.setItem(SPORT_KEY, next) } catch { /* Navigation remains usable without storage. */ }
+  }
 
   useEffect(() => {
     void getSession().then(setSession)
@@ -218,7 +227,13 @@ function App() {
   }
 
   if (session === null) return <main className="auth-shell"><p>Checking session…</p></main>
-  if (session.authenticated) return <Dashboard onLogout={handleLogout} />
+  if (session.authenticated) return <>
+    <nav className="sport-tabs shell" role="tablist" aria-label="Sport research">
+      <button role="tab" type="button" aria-selected={sport === 'nba'} aria-controls="nba-research" onClick={() => selectSport('nba')}>NBA</button>
+      <button role="tab" type="button" aria-selected={sport === 'nfl'} aria-controls="nfl-research" onClick={() => selectSport('nfl')}>NFL</button>
+    </nav>
+    {sport === 'nba' ? <NbaResearch onLogout={handleLogout} /> : <div id="nfl-research"><Dashboard onLogout={handleLogout} /></div>}
+  </>
 
   return <main className="auth-shell"><section className="login-card" aria-labelledby="login-title"><a className="brand" href="#login"><span className="brand-mark">E</span><span>EDGEBOARD</span></a><p className="eyebrow">ADMIN ACCESS</p><h1 id="login-title">Paper research, locked down.</h1><p>Sign in to access the local paper-trading ledger. No live orders are available.</p><form onSubmit={submitLogin}><label>Username<input name="username" autoComplete="username" defaultValue="Admin" required /></label><label>Password<input name="password" autoComplete="current-password" type="password" required /></label><button className="primary" disabled={submitting} type="submit">{submitting ? 'Signing in…' : 'Sign in'}</button>{message && <p role="alert">{message}</p>}</form></section></main>
 }
