@@ -1,7 +1,7 @@
 import { verifySessionToken } from '../server/auth-core.js'
 import { collectOpeningNbaMarkets, OPENING_NBA_GAMES, NBA_KALSHI_BASE, rankOpeningNbaGame, type NbaBook, type NbaMarket } from '../server/nba-kalshi.js'
 import { fitNbaCalibration, forecastNbaGame, type NbaGame } from '../server/nba-model.js'
-import snapshot from '../server/data/nba-games.json'
+import snapshot from '../server/data/nba-games.json' with { type: 'json' }
 
 type Request = { method?: string; headers?: { cookie?: string }; query?: { date?: string | string[]; quantity?: string | string[] } }
 type Response = { setHeader: (name: string, value: string) => void; status: (code: number) => { json: (body: unknown) => void } }

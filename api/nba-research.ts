@@ -1,6 +1,6 @@
 import { verifySessionToken } from '../server/auth-core.js'
 import { fitNbaCalibration, forecastNbaGame, recentNbaMeetings, type NbaGame } from '../server/nba-model.js'
-import snapshot from '../server/data/nba-games.json'
+import snapshot from '../server/data/nba-games.json' with { type: 'json' }
 
 type Request = { method?: string; headers?: { cookie?: string }; query?: { date?: string | string[] } }
 type Response = { setHeader: (name: string, value: string) => void; status: (code: number) => { json: (body: unknown) => void } }
