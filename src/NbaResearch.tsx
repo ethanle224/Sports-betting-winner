@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { offseasonExamples } from './nba-offseason'
 import { nbaLineChance, type NbaForecast } from '../server/nba-model'
 import NbaFreezePanel from './NbaFreezePanel'
-import type { NbaScan, NbaScanGame, NbaStudySide } from './nba-paper'
+import { nbaSideLabel, readNbaFreezes, trackNbaPick, type NbaScan, type NbaScanGame, type NbaStudySide } from './nba-paper'
 
 type Team = { id: string; name: string; abbreviation: string; pointsFor: number; pointsAgainst: number; wins: number; losses: number }
 type Meeting = { id: string; tip: string; homeId: string; awayId: string; homeScore: number; awayScore: number; neutral: boolean }
@@ -13,26 +13,14 @@ type Research = { date: string; observedAt: string; priorSeason: string; teams: 
   historyObservedAt?: string; sources: { standings: string; schedule: string; history?: { url: string; sha256: string }[] }; ratingsStatus: string; forecastStatus: string }
 type KalshiStudy = NbaScan & { sources: { schedule: string; markets: string; feeSchedule: string } }
 
-function sideLabel(side: NbaStudySide, game: NbaScanGame): string {
-  if (side.market === 'total' && side.line !== null) return `${side.side === 'no' ? 'Under' : 'Over'} ${side.line}`
-  const win = /^If (.+?) wins by more than ([\d.]+) points\b/.exec(side.rules)
-  if (side.market === 'spread' && win && side.line !== null) {
-    const team = side.side === 'yes' ? win[1] : win[1] === game.home ? game.away : game.home
-    return `${team} ${side.side === 'yes' ? '-' : '+'}${side.line}`
-  }
-  const winner = /^If (.+?) wins\b/.exec(side.rules)
-  if (side.market === 'moneyline' && winner) return `${side.side === 'yes' ? winner[1] : winner[1] === game.home ? game.away : game.home} winner`
-  return `${side.side.toUpperCase()} · ${side.ticker}`
-}
-
 function PricedOption({ side, game, leading = false }: { side: NbaStudySide; game: NbaScanGame; leading?: boolean }) {
-  return <div className="nba-priced-option"><strong>{sideLabel(side, game)}</strong> <span className="nba-option-status">{leading ? 'TOP STUDY · ' : ''}NOT QUALIFIED</span>
-    <p><code>{side.ticker}</code> · {side.side.toUpperCase()} · {side.market} · 10 paper contracts</p>
-    <p>Score-only model {(side.probability * 100).toFixed(1)}% · sized quote {(side.price * 100).toFixed(1)}¢ + estimated fee {(side.feeEstimate / 10 * 100).toFixed(2)}¢ per contract · all-in {(side.allInCost * 100).toFixed(2)}¢ · model–cost gap {(side.estimatedNetEdge * 100).toFixed(2)} pp.</p>
-    {leading && <p>1 unit staked at this snapshot price: win {side.allInCost > 0 ? `+${(1 / side.allInCost - 1).toFixed(2)}u` : 'unavailable'} · loss −1.00u. Fair-price settlement varies. No fill implied.</p>}
-    <details><summary>Reasoning &amp; risks — {sideLabel(side, game)}</summary>
+  return <div className="nba-priced-option"><strong>{nbaSideLabel(side, game)}</strong> <span className="nba-option-status">{leading ? 'TOP STUDY · ' : ''}NOT QUALIFIED</span>
+    {leading && <p className="nba-pick-economics">1u paper stake · all-in {(side.allInCost * 100).toFixed(2)}¢ · win {side.allInCost > 0 ? `+${(1 / side.allInCost - 1).toFixed(2)}u` : 'unavailable'} · loss −1u</p>}
+    <details><summary>Reasoning &amp; risks — {nbaSideLabel(side, game)}</summary>
+      <p><code>{side.ticker}</code> · {side.side.toUpperCase()} · {side.market} · 10 paper contracts</p>
+      <p>Score-only model {(side.probability * 100).toFixed(1)}% · sized quote {(side.price * 100).toFixed(1)}¢ + estimated fee {(side.feeEstimate / 10 * 100).toFixed(2)}¢ per contract · all-in {(side.allInCost * 100).toFixed(2)}¢ · model–cost gap {(side.estimatedNetEdge * 100).toFixed(2)} pp.</p>
       <p>Ranked by score-only probability minus estimated all-in cost at this scan, not by preseason results or a validated edge. A positive model–cost gap is not a profit forecast. This side pays $1 only if its exact {side.side.toUpperCase()} contract outcome occurs; displayed book depth is not a fill.</p>
-      <p>Still unverified: injuries, starters, roster-adjusted matchup, pace, threes, ball movement, current fees, and final fillability. Rerun the scan before tip. Venue and recent head-to-head are context, not extra numerical weight.</p>
+      <p>Still unverified: injuries, starters, roster-adjusted matchup, pace, threes, ball movement, current fees, and final fillability. Fair-price settlement can differ from binary results. Rerun the scan before tip. Venue and recent head-to-head are context, not extra numerical weight.</p>
       <p>Exact rule: {side.rules}</p><p>{side.rulesSecondary}</p>
     </details></div>
 }
@@ -50,9 +38,21 @@ export default function NbaResearch({ onLogout }: { onLogout: () => Promise<void
   const [scanBusy, setScanBusy] = useState(false)
   const [scanError, setScanError] = useState('')
   const [nbaView, setNbaView] = useState<'scan' | 'history'>('scan')
-  const [paperSlip, setPaperSlip] = useState<string[]>([])
+  const [tracked, setTracked] = useState<string[]>(() => {
+    try { return readNbaFreezes(localStorage).flatMap((record) => record.decisions.filter((decision) => decision.selected && decision.evidence?.requestedPaper).map((decision) => decision.gameId)) }
+    catch { return [] }
+  })
+  const [ledgerRevision, setLedgerRevision] = useState(0)
+  const [trackError, setTrackError] = useState('')
+  function trackPick(gameId: string) {
+    if (!study) return
+    try {
+      trackNbaPick(localStorage, study, gameId, new Date().toISOString())
+      setTracked((old) => [...old, gameId]); setLedgerRevision((old) => old + 1); setTrackError('')
+    } catch (failure) { setTrackError(failure instanceof Error ? failure.message : 'Paper pick not saved') }
+  }
   async function scanOpeningSlate() {
-    setStudy(null); setPaperSlip([]); setScanError(''); setScanBusy(true)
+    setStudy(null); setTrackError(''); setScanError(''); setScanBusy(true)
     try {
       const response = await fetch('/api/nba-scan?date=2026-10-20&quantity=10', { credentials: 'same-origin' })
       if (!response.ok) throw new Error('Kalshi scan unavailable. No partial study sides shown.')
@@ -92,40 +92,39 @@ export default function NbaResearch({ onLogout }: { onLogout: () => Promise<void
   const underChance = forecast && total.trim() ? nbaLineChance(forecast, 'under', Number(total)) : null
   const relevantMoves = offseasonExamples.filter((move) => home && away && move.teams.some((team) => team === home.abbreviation || team === away.abbreviation))
   return <main className="shell nba-research" id="nba-research">
+    <nav className="nba-view-tabs" role="tablist" aria-label="NBA paper workspace"><button type="button" role="tab" aria-selected={nbaView === 'scan'} onClick={() => setNbaView('scan')}>Scan &amp; choices</button><button type="button" role="tab" aria-selected={nbaView === 'history'} onClick={() => setNbaView('history')}>Bet history</button></nav>
     <header className="topbar"><a className="brand" href="#nba-research" aria-label="Edgeboard NBA home"><span className="brand-mark">E</span><span>EDGEBOARD</span></a><div className="topbar-actions"><span className="status">NBA PAPER RESEARCH · NO REAL ORDERS</span><button className="logout" type="button" onClick={() => void onLogout()}>Log out</button></div></header>
     <section className="board nba-paper-workspace" aria-label="October 20 Kalshi study checklist"><p className="eyebrow">01 / NBA PAPER DESK</p><h2>Scan opening-night choices &amp; track results</h2>
-      <div className="nba-view-tabs" role="tablist" aria-label="NBA paper workspace"><button type="button" role="tab" aria-selected={nbaView === 'scan'} onClick={() => setNbaView('scan')}>Scan &amp; choices</button><button type="button" role="tab" aria-selected={nbaView === 'history'} onClick={() => setNbaView('history')}>Bet history</button></div>
       {nbaView === 'scan' && <>
-      <p className="help">One ranked study choice per game, with other inspected priced sides and expandable reasons. These are paper-only comparisons, not qualified picks or orders. Quotes and fees can change.</p>
+      <p className="help">Scan, pick a side, tap Track. Each click saves one pending 1u paper study in this browser. Not a qualified edge or real order.</p>
       {date === '2026-10-20' ? <button type="button" disabled={scanBusy} onClick={() => void scanOpeningSlate()}>{scanBusy ? 'Scanning Kalshi…' : 'Scan Kalshi opening slate'}</button> : <p className="help">Exact Kalshi mapping is available for October 20 only; choose that date below to scan.</p>}
-      {scanError && <p role="alert">{scanError}</p>}
+      {scanError && <p role="alert">{scanError}</p>}{trackError && <p role="alert">{trackError}</p>}
       {study && date === '2026-10-20' && <><p className="help">Observed {new Date(study.observedAt).toLocaleString()} · 10 whole contracts per inspected side · quotes may change before tip. <a href={study.sources.markets} target="_blank" rel="noreferrer">Kalshi public markets</a> · <a href={study.sources.feeSchedule} target="_blank" rel="noreferrer">fee schedule</a></p>
         <div className="nba-study-grid">{study.games.map((item) => <article key={item.gameId} className="nba-study-card"><h3>{item.away} @ {item.home}</h3>
-          <p>Listed full-game contracts — ML: {item.coverage.moneyline} · Spread: {item.coverage.spread} · Total: {item.coverage.total}. {item.coverage.spread === 0 || item.coverage.total === 0 ? 'Missing market families are not simulated.' : ''}</p>
           {item.studySide ? <><p><strong>Study side · not a qualified bet</strong></p><PricedOption side={item.studySide} game={item} leading />
-            <button className="nba-add-paper" type="button" aria-pressed={paperSlip.includes(item.gameId)}
-              onClick={() => setPaperSlip((old) => old.includes(item.gameId) ? old.filter((id) => id !== item.gameId) : [...old, item.gameId])}>
-              {paperSlip.includes(item.gameId) ? `Remove ${sideLabel(item.studySide, item)} from paper slip` : `Add ${sideLabel(item.studySide, item)} to paper slip`}
+            <button className="nba-add-paper" type="button" disabled={tracked.includes(item.gameId)} onClick={() => trackPick(item.gameId)}>
+              {tracked.includes(item.gameId) ? `${nbaSideLabel(item.studySide, item)} tracked · see history` : `Track ${nbaSideLabel(item.studySide, item)} as paper pick · 1u`}
             </button>
             <details><summary>Other priced options ({Math.max(0, (item.candidates?.length ?? 1) - 1)})</summary>
               {(item.candidates ?? []).filter((candidate) => candidate.ticker !== item.studySide?.ticker || candidate.side !== item.studySide?.side).map((candidate) =>
                 <PricedOption key={`${candidate.ticker}:${candidate.side}`} side={candidate} game={item} />)}</details></> : <p>No sized book/model comparison available. No study side invented.</p>}
+          <details className="nba-market-checks"><summary>Market coverage &amp; missing checks</summary>
+          <p>Listed full-game contracts — ML: {item.coverage.moneyline} · Spread: {item.coverage.spread} · Total: {item.coverage.total}. {item.coverage.spread === 0 || item.coverage.total === 0 ? 'Missing market families are not simulated.' : ''}</p>
           <p className="help">{item.candidates?.length ?? (item.studySide ? 1 : 0)} priced options inspected from selected lines · listed contracts are not all priced or qualified.</p>
           <ul className="nba-study-checks"><li>Game mapped: {item.checklist?.mappedGame ? 'verified against schedule' : 'unverified'}</li>
             <li>Offense vs defense and pace: raw scoring included; opponent-adjusted ratings and possessions unverified</li>
             <li>Three-point attempts, makes and opponent defense: unverified</li><li>Assists, touches and chemistry: unverified</li>
             <li>Venue and recent H2H: contextual below; zero extra numerical weight</li><li>Rest, travel and roster continuity: unverified</li>
             <li>Injury and expected lineup: unverified</li><li>Contract resolution / fair-price risk: unverified</li>
-            <li>Final fee and fillability: unverified; current displayed depth is not a fill</li></ul>
-        </article>)}</div><p className="nba-slip-count">Paper slip: {paperSlip.length} {paperSlip.length === 1 ? 'selection' : 'selections'} · {paperSlip.length} {paperSlip.length === 1 ? 'unit' : 'units'} at risk if frozen (1 per selection). Drafts are not tracked until a fresh pre-tip freeze.</p></>}
+            <li>Final fee and fillability: unverified; current displayed depth is not a fill</li></ul></details>
+        </article>)}</div></>}
       </>}
-      <NbaFreezePanel key={study?.observedAt ?? 'no-scan'} scan={study} view={nbaView} requestedIds={paperSlip}
-        onRequestedChange={(id, requested) => setPaperSlip((old) => requested ? old.includes(id) ? old : [...old, id] : old.filter((item) => item !== id))} />
+      {nbaView === 'history' && <NbaFreezePanel key={`history-${ledgerRevision}`} scan={null} view="history" />}
     </section>
     <section className="hero"><div><p className="eyebrow">NBA / 2026–27 · PAPER RESEARCH ONLY</p><h1>A baseline.<br /><em>Not a promise.</em></h1><p className="lede">Our priority is net units after costs, not a promised win percentage. Scores-only probabilities are experimental; they are not a betting edge. NFL forecasts, rules and paper records stay in their own tab.</p></div><aside className="risk-card"><span>DECISION STATUS</span><strong>Paper studies, not qualified picks</strong><div>The choices above are live-scan research leads. Current lineups, exact costs and prospective profitability remain unverified.</div></aside></section>
     <section className="board" aria-labelledby="matchups-heading"><p className="eyebrow">02 / MATCHUP DESK</p><h2 id="matchups-heading">Upcoming regular-season slate</h2>
       <p className="help">Choose a regular-season game date. ESPN schedule and 2025–26 regular-season standings are fetched together; incomplete data fails closed. These are past team averages, not a 2026–27 lineup-adjusted forecast.</p>
-      <div className="scan-controls"><label>NBA game date<input type="date" min="2026-10-20" max="2027-04-11" value={date} onChange={(event) => { setDate(event.target.value); setStudy(null); setPaperSlip([]); setScanError('') }} /></label><span>{busy ? 'Loading sourced NBA data…' : data ? `Observed ${new Date(data.observedAt).toLocaleString()}` : 'No current comparison'}</span></div>
+      <div className="scan-controls"><label>NBA game date<input type="date" min="2026-10-20" max="2027-04-11" value={date} onChange={(event) => { setDate(event.target.value); setStudy(null); setScanError('') }} /></label><span>{busy ? 'Loading sourced NBA data…' : data ? `Observed ${new Date(data.observedAt).toLocaleString()}` : 'No current comparison'}</span></div>
       {error && <p role="alert">{error}</p>}
       {data && <>
         {data.games.length ? <div className="nba-game-list" role="group" aria-label="NBA matchups">{data.games.map((item) => <button key={item.id} type="button" aria-pressed={selected === item.id} onClick={() => setSelected(item.id)}>{item.away} @ {item.home}<small>{new Date(item.startsAt).toLocaleString()}</small></button>)}</div> : <p className="help">No regular-season games listed for this date. No picks implied.</p>}

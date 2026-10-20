@@ -21,6 +21,18 @@ export type NbaReviewInput = { scanId: string; gameId: string; observedAt: strin
   outcome: 'YES' | 'NO' | 'FAIR_PRICE'; payout: number; note: string }
 export type NbaReview = NbaReviewInput & { id: string; simulatedNetUnits: number; unitDollars?: 25;
   stakeUnits?: 1; unitBasis?: 'ENTRY_STAKE'; entryCostPerContract: number; quantity: number; label: 'SIMULATED_NO_FILL' }
+
+export function nbaSideLabel(side: NbaStudySide, game: NbaScanGame): string {
+  if (side.market === 'total' && side.line !== null) return `${side.side === 'no' ? 'Under' : 'Over'} ${side.line}`
+  const win = /^If (.+?) wins by more than ([\d.]+) points\b/.exec(side.rules)
+  if (side.market === 'spread' && win && side.line !== null) {
+    const team = side.side === 'yes' ? win[1] : win[1] === game.home ? game.away : game.home
+    return `${team} ${side.side === 'yes' ? '-' : '+'}${side.line}`
+  }
+  const winner = /^If (.+?) wins\b/.exec(side.rules)
+  if (side.market === 'moneyline' && winner) return `${side.side === 'yes' ? winner[1] : winner[1] === game.home ? game.away : game.home} winner`
+  return `${side.side.toUpperCase()} · ${side.ticker}`
+}
 type Storage = Pick<globalThis.Storage, 'getItem' | 'setItem'>
 const IDS = ['401909088', '401909089', '401909090']
 const validUrl = (text: string) => {
@@ -93,6 +105,29 @@ export function appendNbaFreeze(storage: Storage, record: NbaFreeze): NbaFreeze[
   const updated = [...prior, record]
   storage.setItem(NBA_FREEZE_KEY, JSON.stringify(updated))
   return updated
+}
+
+export function trackNbaPick(storage: Storage, scan: NbaScan, gameId: string, nowIso: string): NbaFreeze {
+  const game = scan.games.find((item) => item.gameId === gameId)
+  if (!game?.studySide) throw new Error('No priced paper pick for this game')
+  const evidence: NbaEvidence = { requestedPaper: true, availabilitySource: '', availabilityObservedAt: '',
+    availabilityNotes: '', rulesSource: '', feeSource: '', uncertaintyAccepted: false, rationale: '' }
+  // Validate scan freshness, all three mapped games and the pre-tip boundary even
+  // for the one-click path. Other games are retained for audit but not requested.
+  const snapshot = freezeNbaStudy(scan, { [gameId]: evidence }, nowIso)
+  const chosen = snapshot.decisions.find((decision) => decision.gameId === gameId)
+  if (!chosen?.selected || chosen.reasons.some((reason) =>
+    ['Independent score forecast missing', 'Raw sized orderbook missing or stale',
+      'No positive post-estimated-cost model gap', 'Contract rule text missing'].includes(reason))) {
+    throw new Error('No valid priced book, forecast, cost or contract rule for this paper pick')
+  }
+  if (readNbaFreezes(storage).some((record) => record.decisions.some((decision) =>
+    decision.gameId === gameId && decision.selected && decision.evidence?.requestedPaper))) {
+    throw new Error('Already tracking a paper pick for this game')
+  }
+  const record = { ...snapshot, id: `${snapshot.id}:${gameId}` }
+  appendNbaFreeze(storage, record)
+  return record
 }
 
 export function readNbaReviews(storage: Storage): NbaReview[] {

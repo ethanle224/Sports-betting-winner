@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { appendNbaFreeze, appendNbaReview, freezeNbaStudy, readNbaFreezes, readNbaReviews, summarizeNbaHistory, type NbaEvidence, type NbaScan } from './nba-paper'
+import { appendNbaFreeze, appendNbaReview, freezeNbaStudy, readNbaFreezes, readNbaReviews, summarizeNbaHistory, trackNbaPick, type NbaEvidence, type NbaScan } from './nba-paper'
 
 const now = '2026-10-19T20:00:00Z'
 const side = { ticker: 'KXNBAGAME-26OCT20BOSDET-BOS', market: 'moneyline', side: 'yes', line: null,
@@ -19,6 +19,19 @@ const attestation: NbaEvidence = { requestedPaper: true, availabilitySource: 'ht
   uncertaintyAccepted: true, rationale: 'Price is favorable only if the baseline remains calibrated.' }
 
 describe('NBA paper-only opening-slate freeze', () => {
+  it('tracks a single clicked game immediately as an unqualified one-unit pending study, once per game', () => {
+    const memory = new Map<string, string>()
+    const storage = { getItem: (key: string) => memory.get(key) ?? null, setItem: (key: string, value: string) => { memory.set(key, value) } }
+    const first = trackNbaPick(storage, scan, '401909088', now)
+    expect(first.id).toBe(`${scan.observedAt}:401909088`)
+    expect(first.decisions[0]).toMatchObject({ status: 'STUDY', selected: side, evidence: { requestedPaper: true } })
+    expect(summarizeNbaHistory(readNbaFreezes(storage), [])).toMatchObject({ pending: 1, wins: 0, losses: 0, simulatedNetUnits: 0 })
+    expect(() => trackNbaPick(storage, scan, '401909088', now)).toThrow(/already tracking/i)
+    expect(() => trackNbaPick(storage, scan, '401909089', now)).toThrow(/no priced/i)
+    expect(() => trackNbaPick(storage, scan, '401909088', '2026-10-20T19:00:00Z')).toThrow(/tip|stale/i)
+    const noBook = { ...scan, games: scan.games.map((game, index) => index ? game : { ...game, inspected: [] }) }
+    expect(() => trackNbaPick({ getItem: () => null, setItem: () => {} }, noBook, '401909088', now)).toThrow(/priced|book/i)
+  })
   it('preserves every game and the full raw scan, with rejected sides honestly marked', () => {
     const frozen = freezeNbaStudy(scan, {}, now)
     expect(frozen.scan).toEqual(scan)
