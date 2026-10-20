@@ -75,7 +75,7 @@ describe('NBA opening-slate freeze UI', () => {
     fireEvent.change(within(review).getByLabelText('Settlement evidence notes'), { target: { value: 'Kalshi contract result shows YES after final score.' } })
     fireEvent.click(within(review).getByRole('button', { name: 'Save settlement review' }))
     expect(JSON.parse(localStorage.getItem('edgeboard-nba-reviews-v1') || '[]')).toHaveLength(1)
-    expect(screen.getByText(/Simulated post-cost net units/)).toBeInTheDocument()
+    expect(screen.getByText(/simulated net units/)).toBeInTheDocument()
     expect(JSON.parse(localStorage.getItem('edgeboard-nba-freezes-v1') || '[]')[0]).toEqual(freeze)
   })
   it('offers a winning payout for a frozen NO-side position when the contract resolves NO', () => {

@@ -72,7 +72,8 @@ describe('NBA paper-only opening-slate freeze', () => {
       source: 'https://external-api.kalshi.com/trade-api/v2/markets/KXNBAGAME-26OCT20BOSDET-BOS',
       outcome: 'YES' as const, payout: 1, note: 'Observed final contract settlement after game.' }
     const review = appendNbaReview(storage, input, '2026-10-21T04:05:00Z')
-    expect(review.simulatedNetUnits).toBeCloseTo((1 - side.allInCost) * scan.quantity / 25)
+    expect(review.simulatedNetUnits).toBeCloseTo(1 / side.allInCost - 1)
+    expect(review.stakeUnits).toBe(1)
     expect(readNbaReviews(storage)).toEqual([review])
     expect(readNbaFreezes(storage)[0]).toEqual(frozen)
     expect(() => appendNbaReview(storage, input, '2026-10-21T04:05:00Z')).toThrow(/duplicate/i)
@@ -87,7 +88,7 @@ describe('NBA paper-only opening-slate freeze', () => {
     const input = { scanId: frozen.id, gameId: '401909088', observedAt: '2026-10-21T04:00:00Z',
       source: 'https://external-api.kalshi.com/trade-api/v2/markets/KXNBAGAME-26OCT20BOSDET-BOS',
       outcome: 'FAIR_PRICE' as const, payout: .42, note: 'Contract settled at a nonbinary fair price.' }
-    expect(appendNbaReview(storage, input, '2026-10-21T04:05:00Z').simulatedNetUnits).toBeCloseTo((.42 - side.allInCost) * scan.quantity / 25)
+    expect(appendNbaReview(storage, input, '2026-10-21T04:05:00Z').simulatedNetUnits).toBeCloseTo(.42 / side.allInCost - 1)
     expect(() => appendNbaReview(storage, { ...input, scanId: 'not-a-scan' }, '2026-10-21T04:05:00Z')).toThrow(/frozen/i)
   })
   it('scores a selected NO side as a win when the contract settles NO', () => {
@@ -99,7 +100,7 @@ describe('NBA paper-only opening-slate freeze', () => {
     const input = { scanId: frozen.id, gameId: '401909088', observedAt: '2026-10-21T04:00:00Z',
       source: 'https://external-api.kalshi.com/trade-api/v2/markets/KXNBAGAME-26OCT20BOSDET-BOS',
       outcome: 'NO' as const, payout: 1, note: 'NO contract settled and selected NO side paid out.' }
-    expect(appendNbaReview(storage, input, '2026-10-21T04:05:00Z').simulatedNetUnits).toBeCloseTo((1 - side.allInCost) * scan.quantity / 25)
+    expect(appendNbaReview(storage, input, '2026-10-21T04:05:00Z').simulatedNetUnits).toBeCloseTo(1 / side.allInCost - 1)
   })
   it('tracks requested forced studies as pending then wins or losses without counting unrequested research', () => {
     const memory = new Map<string, string>()
@@ -112,7 +113,7 @@ describe('NBA paper-only opening-slate freeze', () => {
     appendNbaReview(storage, { scanId: frozen.id, gameId: '401909088', observedAt: '2026-10-21T04:00:00Z',
       source: 'https://external-api.kalshi.com/trade-api/v2/markets/KXNBAGAME-26OCT20BOSDET-BOS',
       outcome: 'NO', payout: 0, note: 'Verified NO settlement; YES paper side lost.' }, '2026-10-21T04:05:00Z')
-    expect(summarizeNbaHistory(readNbaFreezes(storage), readNbaReviews(storage))).toMatchObject({ pending: 0, wins: 0, losses: 1 })
+    expect(summarizeNbaHistory(readNbaFreezes(storage), readNbaReviews(storage))).toMatchObject({ pending: 0, wins: 0, losses: 1, simulatedNetUnits: -1 })
     expect(readNbaFreezes(storage)[0]).toEqual(frozen)
   })
   it('does not call a fair-price payout a binary win/loss', () => {
@@ -122,5 +123,6 @@ describe('NBA paper-only opening-slate freeze', () => {
       payout: .42, note: 'Fair-price settlement verified.', simulatedNetUnits: -.0428, unitDollars: 25 as const,
       entryCostPerContract: .527, quantity: 10, label: 'SIMULATED_NO_FILL' as const }
     expect(summarizeNbaHistory([frozen], [review])).toMatchObject({ pending: 0, wins: 0, losses: 0, fairPrice: 1 })
+    expect(summarizeNbaHistory([frozen], [review]).simulatedNetUnits).toBeCloseTo(.42 / .527 - 1)
   })
 })

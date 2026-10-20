@@ -35,7 +35,7 @@ const pricedScan = { ...scan, games: scan.games.map((item, index) => {
 }) }
 
 describe('October 20 NBA Kalshi checklist', () => {
-  afterEach(() => vi.restoreAllMocks())
+  afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); localStorage.clear() })
   it('shows an opt-in read-only scan with three study sides, missing spread/total markets and pending gates', async () => {
     const fetcher = vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => ({ ok: true, json: async () => String(url).includes('nba-scan') ? scan : research }) as Response)
     render(<NbaResearch onLogout={vi.fn()} />)
@@ -47,7 +47,7 @@ describe('October 20 NBA Kalshi checklist', () => {
     expect(within(panel).getAllByText(/injury.*lineup.*unverified/i)).toHaveLength(3)
     expect(within(panel).getAllByText(/fee.*unverified/i)).toHaveLength(3)
     expect(within(panel).getByText('KXNBAGAME-26OCT20BOSDET-BOS')).toBeInTheDocument()
-    expect(within(panel).getByRole('button', { name: 'Freeze three-game NBA snapshot' })).toBeInTheDocument()
+    expect(within(panel).getByRole('button', { name: 'Freeze 0 selected paper bets · 1 unit each' })).toBeDisabled()
     expect(fetcher).toHaveBeenCalledWith('/api/nba-scan?date=2026-10-20&quantity=10', expect.objectContaining({ credentials: 'same-origin' }))
     expect(screen.queryByRole('heading', { name: /No qualified NBA picks yet/i })).not.toBeInTheDocument()
   })
@@ -86,6 +86,13 @@ describe('October 20 NBA Kalshi checklist', () => {
     fireEvent.click(details)
     expect(within(panel).getAllByText(/score-only probability minus estimated all-in cost/i).length).toBeGreaterThan(0)
     expect(within(panel).getAllByText(/Other priced options/)).toHaveLength(3)
+    fireEvent.click(within(panel).getByRole('button', { name: 'Add Detroit +1.5 to paper slip' }))
+    expect(within(panel).getByText(/Paper slip: 1 selection · 1 unit at risk/i)).toBeInTheDocument()
+    expect(within(panel).getByRole('button', { name: 'Remove Detroit +1.5 from paper slip' })).toBeInTheDocument()
+    expect(within(panel).getByLabelText('Request paper experiment for Boston @ Detroit')).toBeChecked()
+    expect(within(panel).getByRole('button', { name: 'Freeze 1 selected paper bet · 1 unit each' })).toBeEnabled()
+    fireEvent.click(within(panel).getByRole('button', { name: 'Remove Detroit +1.5 from paper slip' }))
+    expect(within(panel).getByLabelText('Request paper experiment for Boston @ Detroit')).not.toBeChecked()
   })
   it('switches to an NBA-only bet history tab even without a current scan', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue({ ok: true, json: async () => research } as Response)
@@ -105,5 +112,20 @@ describe('October 20 NBA Kalshi checklist', () => {
     expect(scanButton.compareDocumentPosition(desk) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     expect(historyTab.compareDocumentPosition(desk) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     expect(screen.queryByText('No qualified NBA picks yet')).not.toBeInTheDocument()
+  })
+  it('freezes only the chosen top paper side into the browser-local 1-unit tracker', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true }); vi.setSystemTime(new Date('2026-10-07T02:31:00Z'))
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => ({ ok: true, json: async () => String(url).includes('nba-scan') ? pricedScan : research }) as Response)
+    render(<NbaResearch onLogout={vi.fn()} />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Scan Kalshi opening slate' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Add Detroit +1.5 to paper slip' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Freeze 1 selected paper bet · 1 unit each' }))
+    const stored = JSON.parse(localStorage.getItem('edgeboard-nba-freezes-v1') || '[]')
+    expect(stored).toHaveLength(1)
+    expect(stored[0].decisions.filter((decision: { evidence: { requestedPaper: boolean } }) => decision.evidence.requestedPaper)).toHaveLength(1)
+    expect(stored[0].decisions[0].selected.ticker).toBe('KXNBASPREAD-26OCT20BOSDET-BOS2')
+    fireEvent.click(screen.getByRole('tab', { name: 'Bet history' }))
+    expect(screen.getByText('Pending: 1')).toBeInTheDocument()
+    expect(screen.getByText('Simulated net units: 0.000')).toBeInTheDocument()
   })
 })

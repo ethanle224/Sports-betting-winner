@@ -19,8 +19,8 @@ export type NbaDecision = { gameId: string; status: 'STUDY' | 'PAPER_EXPERIMENT'
 export type NbaFreeze = { id: string; frozenAt: string; scan: NbaScan; decisions: NbaDecision[] }
 export type NbaReviewInput = { scanId: string; gameId: string; observedAt: string; source: string;
   outcome: 'YES' | 'NO' | 'FAIR_PRICE'; payout: number; note: string }
-export type NbaReview = NbaReviewInput & { id: string; simulatedNetUnits: number; unitDollars: 25;
-  entryCostPerContract: number; quantity: number; label: 'SIMULATED_NO_FILL' }
+export type NbaReview = NbaReviewInput & { id: string; simulatedNetUnits: number; unitDollars?: 25;
+  stakeUnits?: 1; unitBasis?: 'ENTRY_STAKE'; entryCostPerContract: number; quantity: number; label: 'SIMULATED_NO_FILL' }
 type Storage = Pick<globalThis.Storage, 'getItem' | 'setItem'>
 const IDS = ['401909088', '401909089', '401909090']
 const validUrl = (text: string) => {
@@ -112,7 +112,13 @@ export function summarizeNbaHistory(freezes: NbaFreeze[], reviews: NbaReview[]) 
     wins: entries.filter((entry) => entry.review?.outcome !== 'FAIR_PRICE' && entry.review?.payout === 1).length,
     losses: entries.filter((entry) => entry.review?.outcome !== 'FAIR_PRICE' && entry.review?.payout === 0).length,
     fairPrice: entries.filter((entry) => entry.review?.outcome === 'FAIR_PRICE').length,
-    simulatedNetUnits: entries.reduce((sum, entry) => sum + (entry.review?.simulatedNetUnits ?? 0), 0) }
+    simulatedNetUnits: entries.reduce((sum, entry) => sum + (entry.review ? nbaReturnUnits(entry.review) : 0), 0) }
+}
+
+// A paper position stakes one unit equal to the all-in cost of its 10-contract
+// snapshot. Normalize legacy $25/unit reviews for display without rewriting them.
+export function nbaReturnUnits(review: NbaReview): number {
+  return (review.payout - review.entryCostPerContract) / review.entryCostPerContract
 }
 
 export function appendNbaReview(storage: Storage, input: NbaReviewInput, nowIso = new Date().toISOString()): NbaReview {
@@ -137,8 +143,9 @@ export function appendNbaReview(storage: Storage, input: NbaReviewInput, nowIso 
   const prior = readNbaReviews(storage)
   const id = `${input.scanId}:${input.gameId}`
   if (prior.some((review) => review.id === id)) throw new Error('Duplicate NBA settlement review; original decision is immutable')
-  const review: NbaReview = { ...input, id, simulatedNetUnits: (input.payout - decision.selected.allInCost) * frozen.scan.quantity / 25,
-    unitDollars: 25, entryCostPerContract: decision.selected.allInCost, quantity: frozen.scan.quantity, label: 'SIMULATED_NO_FILL' }
+  const review: NbaReview = { ...input, id, simulatedNetUnits: (input.payout - decision.selected.allInCost) / decision.selected.allInCost,
+    stakeUnits: 1, unitBasis: 'ENTRY_STAKE', entryCostPerContract: decision.selected.allInCost,
+    quantity: frozen.scan.quantity, label: 'SIMULATED_NO_FILL' }
   storage.setItem(NBA_REVIEW_KEY, JSON.stringify([...prior, review]))
   return review
 }

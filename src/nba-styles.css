@@ -48,6 +48,9 @@
 .nba-study-card code { overflow-wrap: anywhere; }
 .nba-study-card details { font-size: 12px; margin: 12px 0; }
 .nba-study-card summary { cursor: pointer; color: #86f7d4; }
+.nba-add-paper { margin: 8px 0 12px; border: 1px solid #86f7d4; background: #143137; color: #86f7d4; padding: 11px 13px; cursor: pointer; font: 700 12px 'DM Mono', monospace; }
+.nba-add-paper[aria-pressed='true'] { color: #08111f; background: #86f7d4; }
+.nba-slip-count { margin: 18px 0; padding: 13px 16px; border: 1px solid #355162; color: #e7f4ee; font-size: 13px; }
 .nba-study-checks { padding-left: 18px; color: #a4b5bc; }
 .nba-freeze-panel { margin-top: 24px; padding: 22px; border: 1px solid #355162; background: #0c1a29; color: #d7e5df; }
 .nba-freeze-panel h3 { margin: 0 0 12px; color: #86f7d4; }

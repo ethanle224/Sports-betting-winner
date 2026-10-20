@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { appendNbaFreeze, appendNbaReview, freezeNbaStudy, readNbaFreezes, readNbaReviews, summarizeNbaHistory,
+import { appendNbaFreeze, appendNbaReview, freezeNbaStudy, nbaReturnUnits, readNbaFreezes, readNbaReviews, summarizeNbaHistory,
   type NbaEvidence, type NbaFreeze, type NbaReview, type NbaScan } from './nba-paper'
 
 const empty: NbaEvidence = { requestedPaper: false, availabilitySource: '', availabilityObservedAt: '', availabilityNotes: '',
@@ -34,7 +34,8 @@ function NbaSettlementForm({ record, gameId, ticker, side, onSaved }: { record: 
   </fieldset>
 }
 
-export default function NbaFreezePanel({ scan, view = 'scan' }: { scan: NbaScan | null; view?: 'scan' | 'history' }) {
+export default function NbaFreezePanel({ scan, view = 'scan', requestedIds, onRequestedChange }: { scan: NbaScan | null;
+  view?: 'scan' | 'history'; requestedIds?: string[]; onRequestedChange?: (id: string, requested: boolean) => void }) {
   const [evidence, setEvidence] = useState<Record<string, NbaEvidence>>({})
   const [initial] = useState(() => {
     try { return { records: readNbaFreezes(localStorage), reviews: readNbaReviews(localStorage), error: '' } }
@@ -48,7 +49,9 @@ export default function NbaFreezePanel({ scan, view = 'scan' }: { scan: NbaScan 
   function freeze() {
     if (!scan || error) return
     try {
-      const record = freezeNbaStudy(scan, evidence, new Date().toISOString())
+      const selections = requestedIds === undefined ? evidence : Object.fromEntries(scan.games.map((game) =>
+        [game.gameId, { ...empty, ...evidence[game.gameId], requestedPaper: requestedIds.includes(game.gameId) }]))
+      const record = freezeNbaStudy(scan, selections, new Date().toISOString())
       setRecords(appendNbaFreeze(localStorage, record))
     } catch (failure) { setError(failure instanceof Error ? failure.message : 'Cannot freeze NBA snapshot') }
   }
@@ -63,12 +66,12 @@ export default function NbaFreezePanel({ scan, view = 'scan' }: { scan: NbaScan 
   return <div className="nba-freeze-panel">
     <h3>{view === 'scan' ? 'Opening slate decision freeze · browser-local' : 'NBA paper bet history · browser-local'}</h3>
     {view === 'scan' && <>
-    <p className="help">Check “Request paper experiment” on each game you want tracked, then freeze the fresh scan before tip. If availability, rules, fees or rationale are incomplete, it stays a forced STUDY but still appears in Bet history for later settlement review. A PAPER_EXPERIMENT requires dated evidence and a positive estimated-cost gap; neither label is a qualified edge or real order. Save the JSON elsewhere—clearing browser data deletes local records.</p>
+    <p className="help">Add the choices you want to the paper slip above, then freeze the fresh scan before tip. Each selected side stakes 1 paper unit at its snapshot all-in cost (10 whole contracts); a win can return more or less than +1 net unit. Missing evidence keeps it a forced STUDY, not a qualified edge. Export the audit JSON—browser data can be cleared.</p>
     {scan ? <div className="nba-evidence-grid">{scan.games.map((game) => {
       const item = evidence[game.gameId] ?? empty
       return <fieldset key={game.gameId} aria-label={`${game.away} @ ${game.home} paper evidence`}>
         <legend>{game.away} @ {game.home}</legend>
-        <label className="nba-checkbox"><input type="checkbox" checked={item.requestedPaper} onChange={(event) => update(game.gameId, { requestedPaper: event.target.checked })} />Request paper experiment for {game.away} @ {game.home}</label>
+        <label className="nba-checkbox"><input type="checkbox" checked={requestedIds === undefined ? item.requestedPaper : requestedIds.includes(game.gameId)} onChange={(event) => requestedIds === undefined ? update(game.gameId, { requestedPaper: event.target.checked }) : onRequestedChange?.(game.gameId, event.target.checked)} />Request paper experiment for {game.away} @ {game.home}</label>
         <label>Availability source URL<input type="url" value={item.availabilitySource} onChange={(event) => update(game.gameId, { availabilitySource: event.target.value })} placeholder="https://official.nba.com/..." /></label>
         <label>Availability observed at<input type="datetime-local" value={localTime(item.availabilityObservedAt)} onChange={(event) => update(game.gameId, { availabilityObservedAt: event.target.value ? new Date(event.target.value).toISOString() : '' })} /></label>
         <label>Lineup and injury notes<textarea value={item.availabilityNotes} onChange={(event) => update(game.gameId, { availabilityNotes: event.target.value })} placeholder="Who is in/out/questionable? What remains unknown?" /></label>
@@ -79,18 +82,18 @@ export default function NbaFreezePanel({ scan, view = 'scan' }: { scan: NbaScan 
       </fieldset>
     })}</div> : <p className="help">No fresh scan loaded. Earlier frozen records and settlement reviews remain accessible below.</p>}
     </>}
-    <div className="nba-freeze-actions">{view === 'scan' && scan && <button type="button" onClick={freeze} disabled={!!error}>Freeze three-game NBA snapshot</button>}
+    <div className="nba-freeze-actions">{view === 'scan' && scan && <button type="button" onClick={freeze} disabled={!!error || (requestedIds !== undefined && requestedIds.length === 0)}>{requestedIds === undefined ? 'Freeze three-game NBA snapshot' : `Freeze ${requestedIds.length} selected paper ${requestedIds.length === 1 ? 'bet' : 'bets'} · 1 unit each`}</button>}
       <button type="button" onClick={() => { try { download() } catch { setError('Cannot export NBA audit JSON') } }} disabled={!records.length}>Download NBA audit JSON</button></div>
     {error && <p role="alert">{error}</p>}
     {view === 'scan' && <p className="help">Frozen NBA scans: {records.length} · PAPER EXPERIMENT · {records.flatMap((record) => record.decisions).filter((d) => d.status === 'PAPER_EXPERIMENT').length}. Requested but incomplete sides remain STUDY and can be reviewed in history.</p>}
-    {view === 'history' && <><p className="help">Only explicitly requested, pre-tip frozen NBA paper sides count. Forced studies remain unqualified. Each freeze is a separate simulated entry; repeat freezes of the same game count separately. No real fills or orders.</p>
+    {view === 'history' && <><p className="help">Only explicitly requested, pre-tip frozen NBA sides count. 1 unit staked per selection = the all-in 10-contract snapshot cost; net units = selected-side payout divided by that cost, minus 1. Loss = −1u; a win varies by price. Legacy reviews are normalized for this display without changing their audit records. No real fills or orders.</p>
       <div className="nba-history-stats" aria-label="NBA paper win loss tracker"><strong>Wins: {history.wins}</strong><strong>Losses: {history.losses}</strong><strong>Pending: {history.pending}</strong><strong>Fair price: {history.fairPrice}</strong><strong>Simulated net units: {history.simulatedNetUnits.toFixed(3)}</strong></div>
       {history.entries.length === 0 && <p>No requested paper sides frozen yet in this browser. Choices discussed in chat are nominations, not pre-tip freeze records or wins/losses. Run a fresh scan and freeze the sides you want tracked before tip.</p>}</>}
     {records.length > 0 && (view === 'scan' || history.entries.length > 0) && <div className="nba-freeze-history"><h4>Frozen decisions (newest last)</h4>{records.filter((record) => view === 'scan' || record.decisions.some((decision) => decision.selected && decision.evidence?.requestedPaper)).map((record) => <article key={record.id}><time dateTime={record.frozenAt}>{new Date(record.frozenAt).toLocaleString()}</time>
       <ul>{record.decisions.filter((decision) => view === 'scan' || (decision.selected && decision.evidence?.requestedPaper)).map((decision) => <li key={decision.gameId}><strong>{decision.status}</strong> · {decision.gameId} · {decision.selected?.ticker ?? 'No sized side'} {decision.selected ? decision.selected.side.toUpperCase() : ''}
         {view === 'history' && decision.evidence?.requestedPaper && decision.selected && <strong> · {reviews.find((item) => item.id === `${record.id}:${decision.gameId}`)?.outcome === 'FAIR_PRICE' ? 'FAIR PRICE' : reviews.find((item) => item.id === `${record.id}:${decision.gameId}`)?.payout === 1 ? 'WIN' : reviews.find((item) => item.id === `${record.id}:${decision.gameId}`)?.payout === 0 ? 'LOSS' : 'PENDING'} · {decision.status === 'STUDY' ? 'Forced study · not qualified' : 'Paper experiment · not validated'}</strong>}
         {decision.reasons.length > 0 && <span> · {decision.reasons.join('; ')}</span>}
-        {reviews.find((item) => item.id === `${record.id}:${decision.gameId}`) && <p>Simulated post-cost net units: {reviews.find((item) => item.id === `${record.id}:${decision.gameId}`)!.simulatedNetUnits.toFixed(3)} · $25/unit · no fill · operator-attested settlement</p>}
+        {reviews.find((item) => item.id === `${record.id}:${decision.gameId}`) && <p>1u stake · simulated net units: {nbaReturnUnits(reviews.find((item) => item.id === `${record.id}:${decision.gameId}`)!).toFixed(3)} · 10-contract snapshot · no fill · operator-attested settlement</p>}
         {decision.evidence?.requestedPaper && decision.selected && !reviews.some((item) => item.id === `${record.id}:${decision.gameId}`) &&
           Date.now() > Date.parse(record.scan.games.find((game) => game.gameId === decision.gameId)?.startsAt ?? '') &&
           <NbaSettlementForm record={record} gameId={decision.gameId} ticker={decision.selected.ticker} side={decision.selected.side} onSaved={(review) => setReviews((old) => [...old, review])} />}
