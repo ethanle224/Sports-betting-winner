@@ -2,6 +2,7 @@
 .sport-tabs button { border: 1px solid #355162; background: #0c1a29; color: #a4b5bc; cursor: pointer; font: 700 13px 'DM Mono', monospace; letter-spacing: .1em; padding: 12px 26px; }
 .sport-tabs button[aria-selected='true'] { color: #08111f; border-color: #86f7d4; background: #86f7d4; }
 .nba-research .hero { padding-top: 62px; }
+.nba-research .nba-paper-workspace { padding-top: 30px; }
 .nba-research .risk-card { width: 300px; }
 .nba-research .risk-card strong { font-size: 24px; }
 .nba-research a { color: #86f7d4; }

@@ -49,7 +49,7 @@ describe('October 20 NBA Kalshi checklist', () => {
     expect(within(panel).getByText('KXNBAGAME-26OCT20BOSDET-BOS')).toBeInTheDocument()
     expect(within(panel).getByRole('button', { name: 'Freeze three-game NBA snapshot' })).toBeInTheDocument()
     expect(fetcher).toHaveBeenCalledWith('/api/nba-scan?date=2026-10-20&quantity=10', expect.objectContaining({ credentials: 'same-origin' }))
-    expect(screen.getByText(/No qualified NBA picks yet/)).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: /No qualified NBA picks yet/i })).not.toBeInTheDocument()
   })
   it('does not show a stale study side when the Kalshi scan fails', async () => {
     vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => String(url).includes('nba-scan') ? { ok: false, status: 502 } as Response :
@@ -95,5 +95,15 @@ describe('October 20 NBA Kalshi checklist', () => {
     expect(screen.queryByRole('button', { name: 'Scan Kalshi opening slate' })).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('tab', { name: 'Scan & choices' }))
     expect(await screen.findByRole('button', { name: 'Scan Kalshi opening slate' })).toBeInTheDocument()
+  })
+  it('puts scan and history controls before the long research desk instead of burying them', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue({ ok: true, json: async () => research } as Response)
+    render(<NbaResearch onLogout={vi.fn()} />)
+    const scanButton = screen.getByRole('button', { name: 'Scan Kalshi opening slate' })
+    const historyTab = screen.getByRole('tab', { name: 'Bet history' })
+    const desk = screen.getByRole('heading', { name: 'Upcoming regular-season slate' })
+    expect(scanButton.compareDocumentPosition(desk) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(historyTab.compareDocumentPosition(desk) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(screen.queryByText('No qualified NBA picks yet')).not.toBeInTheDocument()
   })
 })
