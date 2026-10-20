@@ -3,6 +3,7 @@ import { offseasonExamples } from './nba-offseason'
 import { nbaLineChance, type NbaForecast } from '../server/nba-model'
 import NbaFreezePanel from './NbaFreezePanel'
 import { nbaSideLabel, readNbaFreezes, trackNbaPick, type NbaScan, type NbaScanGame, type NbaStudySide } from './nba-paper'
+import type { NbaFactor } from '../server/nba-factors'
 
 type Team = { id: string; name: string; abbreviation: string; pointsFor: number; pointsAgainst: number; wins: number; losses: number }
 type Meeting = { id: string; tip: string; homeId: string; awayId: string; homeScore: number; awayScore: number; neutral: boolean }
@@ -13,6 +14,35 @@ type Research = { date: string; observedAt: string; priorSeason: string; teams: 
   historyObservedAt?: string; sources: { standings: string; schedule: string; history?: { url: string; sha256: string }[] }; ratingsStatus: string; forecastStatus: string }
 type KalshiStudy = NbaScan & { sources: { schedule: string; markets: string; feeSchedule: string } }
 
+const factorLabels: { key: keyof NonNullable<NbaScanGame['factors']>; label: string }[] = [
+  { key: 'injuries', label: 'Injury' }, { key: 'starters', label: 'Confirmed starters' },
+  { key: 'offenseDefense', label: 'Prior-season offense / defense' }, { key: 'pace', label: 'Pace proxy' },
+  { key: 'threes', label: 'Three-point profile' }, { key: 'ballMovement', label: 'Ball movement proxy' },
+  { key: 'rosterMatchup', label: 'Roster-adjusted matchup' }, { key: 'venueH2H', label: 'Venue / H2H' },
+  { key: 'contractRules', label: 'Contract rules' }, { key: 'fairPrice', label: 'Fair-price clause' },
+  { key: 'fees', label: 'Current fees' }, { key: 'depth', label: 'Displayed sized depth' },
+  { key: 'fillability', label: 'Final fillability' },
+]
+
+function FactorChecks({ game }: { game: NbaScanGame }) {
+  const evidence = factorLabels.map(({ key, label }) => ({ label, value: game.factors?.[key] ??
+    { status: 'unknown', detail: 'This scan did not return factor evidence.' } as NbaFactor }))
+  const known = evidence.filter(({ value }) => value.status !== 'unknown').length
+  return <><p className="nba-factor-summary">Evidence: {known} of {evidence.length} checks observed or estimated · not a qualified edge</p>
+    <details className="nba-factor-details"><summary>Evidence &amp; gaps</summary>
+      <ul className="nba-study-checks">{evidence.map(({ label, value }) => <li key={label}>
+        <strong>{label} · {value.status.charAt(0).toUpperCase() + value.status.slice(1)}</strong>: {value.detail}
+        {value.observedAt && <span> · observed {new Date(value.observedAt).toLocaleString()}</span>}
+        {value.source?.split(' · ').filter((source) => source.startsWith('https://')).map((source, index) =>
+          <span key={source}> · <a href={source} target="_blank" rel="noreferrer" aria-label={`${label} source${index ? ` ${index + 1}` : ''}`}>source{index ? ` ${index + 1}` : ''} ↗</a></span>)}
+        {value.players?.length ? <ul>{value.players.map((player) => <li key={`${player.team}:${player.name}`}>
+          {player.team}: {player.name} — {player.status} · reported {new Date(player.reportedAt).toLocaleString()}
+        </li>)}</ul> : null}
+      </li>)}</ul>
+      <p>ESPN injury listings are reported statuses, not complete official clearance. <a href="https://official.nba.com/" target="_blank" rel="noreferrer">Check official NBA injury reports ↗</a> before tip. Historical factors are context, not new model weights. Refresh the scan near tip.</p>
+    </details></>
+}
+
 function PricedOption({ side, game, leading = false }: { side: NbaStudySide; game: NbaScanGame; leading?: boolean }) {
   return <div className="nba-priced-option"><strong>{nbaSideLabel(side, game)}</strong> <span className="nba-option-status">{leading ? 'TOP STUDY · ' : ''}NOT QUALIFIED</span>
     {leading && <p className="nba-pick-economics">1u paper stake · all-in {(side.allInCost * 100).toFixed(2)}¢ · win {side.allInCost > 0 ? `+${(1 / side.allInCost - 1).toFixed(2)}u` : 'unavailable'} · loss −1u</p>}
@@ -20,7 +50,7 @@ function PricedOption({ side, game, leading = false }: { side: NbaStudySide; gam
       <p><code>{side.ticker}</code> · {side.side.toUpperCase()} · {side.market} · 10 paper contracts</p>
       <p>Score-only model {(side.probability * 100).toFixed(1)}% · sized quote {(side.price * 100).toFixed(1)}¢ + estimated fee {(side.feeEstimate / 10 * 100).toFixed(2)}¢ per contract · all-in {(side.allInCost * 100).toFixed(2)}¢ · model–cost gap {(side.estimatedNetEdge * 100).toFixed(2)} pp.</p>
       <p>Ranked by score-only probability minus estimated all-in cost at this scan, not by preseason results or a validated edge. A positive model–cost gap is not a profit forecast. This side pays $1 only if its exact {side.side.toUpperCase()} contract outcome occurs; displayed book depth is not a fill.</p>
-      <p>Still unverified: injuries, starters, roster-adjusted matchup, pace, threes, ball movement, current fees, and final fillability. Fair-price settlement can differ from binary results. Rerun the scan before tip. Venue and recent head-to-head are context, not extra numerical weight.</p>
+      <p>Current injuries and lineup, historical team context, rules, fees and book checks have separate sourced statuses under Evidence &amp; gaps. A displayed quote cannot prove a fill. Fair-price settlement can differ from binary results. Rerun the scan before tip.</p>
       <p>Exact rule: {side.rules}</p><p>{side.rulesSecondary}</p>
     </details></div>
 }
@@ -108,15 +138,11 @@ export default function NbaResearch({ onLogout }: { onLogout: () => Promise<void
             <details><summary>Other priced options ({Math.max(0, (item.candidates?.length ?? 1) - 1)})</summary>
               {(item.candidates ?? []).filter((candidate) => candidate.ticker !== item.studySide?.ticker || candidate.side !== item.studySide?.side).map((candidate) =>
                 <PricedOption key={`${candidate.ticker}:${candidate.side}`} side={candidate} game={item} />)}</details></> : <p>No sized book/model comparison available. No study side invented.</p>}
+          <FactorChecks game={item} />
           <details className="nba-market-checks"><summary>Market coverage &amp; missing checks</summary>
           <p>Listed full-game contracts — ML: {item.coverage.moneyline} · Spread: {item.coverage.spread} · Total: {item.coverage.total}. {item.coverage.spread === 0 || item.coverage.total === 0 ? 'Missing market families are not simulated.' : ''}</p>
           <p className="help">{item.candidates?.length ?? (item.studySide ? 1 : 0)} priced options inspected from selected lines · listed contracts are not all priced or qualified.</p>
-          <ul className="nba-study-checks"><li>Game mapped: {item.checklist?.mappedGame ? 'verified against schedule' : 'unverified'}</li>
-            <li>Offense vs defense and pace: raw scoring included; opponent-adjusted ratings and possessions unverified</li>
-            <li>Three-point attempts, makes and opponent defense: unverified</li><li>Assists, touches and chemistry: unverified</li>
-            <li>Venue and recent H2H: contextual below; zero extra numerical weight</li><li>Rest, travel and roster continuity: unverified</li>
-            <li>Injury and expected lineup: unverified</li><li>Contract resolution / fair-price risk: unverified</li>
-            <li>Final fee and fillability: unverified; current displayed depth is not a fill</li></ul></details>
+          <p>Game mapped: {item.checklist?.mappedGame ? 'verified against schedule' : 'unverified'}. Rest, travel and current-roster continuity remain unmodeled. Open Evidence &amp; gaps for each sourced status.</p></details>
         </article>)}</div></>}
       </>}
       {nbaView === 'history' && <NbaFreezePanel key={`history-${ledgerRevision}`} scan={null} view="history" />}

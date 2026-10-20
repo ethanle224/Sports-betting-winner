@@ -31,7 +31,15 @@ const pricedScan = { ...scan, games: scan.games.map((item, index) => {
       : { ticker: 'KXNBASPREAD-26OCT20OKCSAS-SAS5', market: 'spread', side: 'yes', line: 4.5,
         probability: .502, price: .41, feeEstimate: .1694, allInCost: .42694, estimatedNetEdge: .07506,
         rules: 'If San Antonio wins by more than 4.5 points in the Oklahoma City vs San Antonio game, then Yes.', rulesSecondary: 'Postponed games may settle fair price.' }
-  return { ...item, studySide: choice,
+  return { ...item, studySide: choice, ...(index === 0 ? { factors: {
+    injuries: { status: 'reported', detail: '1 dated ESPN listing; not official clearance.', source: 'https://site.api.espn.com/injuries', observedAt: scan.observedAt,
+      players: [{ team: 'Detroit', name: 'Player A', status: 'Out', reportedAt: scan.observedAt }] },
+    starters: { status: 'unknown', detail: 'Confirmed starters unavailable.' },
+    pace: { status: 'estimated', detail: 'Rough 2025–26 possessions per game.' },
+    threes: { status: 'verified', detail: '2025–26 threes per game.' },
+    fees: { status: 'estimated', detail: 'General taker fee formula, not confirmed.' },
+    fillability: { status: 'unknown', detail: 'No guaranteed fill.' },
+  } } : {}),
     inspected: [{ ticker: choice.ticker, observedAt: '2026-10-07T02:29:30Z', source: 'https://kalshi.com/book', book: { orderbook_fp: { no_dollars: [['0.49', '10']] } } }],
     candidates: [choice, { ...choice, ticker: `${choice.ticker}-ALT`, side: choice.side === 'yes' ? 'no' : 'yes', estimatedNetEdge: -.02 }] }
 }) }
@@ -46,8 +54,8 @@ describe('October 20 NBA Kalshi checklist', () => {
     const panel = await screen.findByRole('region', { name: 'October 20 Kalshi study checklist' })
     expect(within(panel).getAllByText(/Study side · not a qualified bet/)).toHaveLength(3)
     expect(within(panel).getAllByText(/Spread: 0.*Total: 0/)).toHaveLength(3)
-    expect(within(panel).getAllByText(/injury.*lineup.*unverified/i)).toHaveLength(3)
-    expect(within(panel).getAllByText(/fee.*unverified/i)).toHaveLength(3)
+    expect(within(panel).getAllByText(/Evidence: 0 of 13 checks/)).toHaveLength(3)
+    expect(within(panel).getAllByText(/Evidence & gaps/).length).toBeGreaterThanOrEqual(3)
     expect(within(panel).getByText('KXNBAGAME-26OCT20BOSDET-BOS')).toBeInTheDocument()
     expect(within(panel).getAllByRole('button', { name: /Track .* as paper pick · 1u/ })).toHaveLength(3)
     expect(fetcher).toHaveBeenCalledWith('/api/nba-scan?date=2026-10-20&quantity=10', expect.objectContaining({ credentials: 'same-origin' }))
@@ -89,6 +97,32 @@ describe('October 20 NBA Kalshi checklist', () => {
     expect(within(panel).getAllByText(/score-only probability minus estimated all-in cost/i).length).toBeGreaterThan(0)
     expect(within(panel).getAllByText(/Other priced options/)).toHaveLength(3)
     expect(within(panel).getByRole('button', { name: 'Track Detroit +1.5 as paper pick · 1u' })).toBeEnabled()
+  })
+  it('shows sourced per-game reported, verified, estimated and unknown factors without calling the study qualified', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => ({ ok: true, json: async () => String(url).includes('nba-scan') ? pricedScan : research }) as Response)
+    render(<NbaResearch onLogout={vi.fn()} />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Scan Kalshi opening slate' }))
+    const panel = await screen.findByRole('region', { name: 'October 20 Kalshi study checklist' })
+    const firstCard = within(panel).getByText('Detroit +1.5').closest('article')!
+    fireEvent.click(within(firstCard).getByText('Evidence & gaps'))
+    expect(within(firstCard).getByText(/Player A — Out/)).toBeInTheDocument()
+    expect(within(firstCard).getByText(/Three-point profile.*Verified/i)).toBeInTheDocument()
+    expect(within(firstCard).getByText(/Pace proxy.*Estimated/i)).toBeInTheDocument()
+    expect(within(firstCard).getByText(/Final fillability.*Unknown/i)).toBeInTheDocument()
+    expect(within(firstCard).getByRole('link', { name: 'Injury source' })).toHaveAttribute('href', 'https://site.api.espn.com/injuries')
+    expect(within(panel).getAllByText(/not a qualified bet/i).length).toBeGreaterThan(0)
+    expect(within(panel).queryByText(/Still unverified: injuries, starters, roster-adjusted matchup/)).not.toBeInTheDocument()
+  })
+  it('still shows matchup evidence when no priced side is available', async () => {
+    const unpriced = { ...pricedScan, games: pricedScan.games.map((item, index) => index === 0 ? { ...item, studySide: null } : item) }
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => ({ ok: true,
+      json: async () => String(url).includes('nba-scan') ? unpriced : research }) as Response)
+    render(<NbaResearch onLogout={vi.fn()} />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Scan Kalshi opening slate' }))
+    const first = (await screen.findByRole('heading', { name: 'Boston @ Detroit' })).closest('article')!
+    expect(within(first).getByText('Evidence & gaps')).toBeInTheDocument()
+    expect(within(first).getByText(/No sized book\/model comparison available/)).toBeInTheDocument()
+    expect(within(first).queryByRole('button', { name: /Track .* paper pick/ })).not.toBeInTheDocument()
   })
   it('switches to an NBA-only bet history tab even without a current scan', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue({ ok: true, json: async () => research } as Response)

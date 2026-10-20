@@ -1,6 +1,7 @@
 import { verifySessionToken } from '../server/auth-core.js'
 import { collectOpeningNbaMarkets, OPENING_NBA_GAMES, NBA_KALSHI_BASE, rankOpeningNbaGame, type NbaBook, type NbaMarket } from '../server/nba-kalshi.js'
-import { fitNbaCalibration, forecastNbaGame, type NbaGame } from '../server/nba-model.js'
+import { collectNbaFactors, type NbaFactor } from '../server/nba-factors.js'
+import { fitNbaCalibration, forecastNbaGame, recentNbaMeetings, type NbaGame } from '../server/nba-model.js'
 import snapshot from '../server/data/nba-games.json' with { type: 'json' }
 
 type Request = { method?: string; headers?: { cookie?: string }; query?: { date?: string | string[]; quantity?: string | string[] } }
@@ -51,6 +52,7 @@ export default async function handler(request: Request, response: Response): Pro
       const freshHistory = Date.parse(event.date) <= Date.parse(snapshot.observedAt) + 21 * 86400000
       const forecast = beforeTip && freshHistory ? forecastNbaGame({ home: homeId, away: awayId, tip: event.date, neutral: competition.neutralSite }, history, calibration) : null
       const chosen = forecast ? selectedMarkets(inventory.markets, mapped.gameId, forecast) : []
+      const contextPromise = collectNbaFactors(mapped, history, new Date().toISOString())
       const rawBooks: Record<string, NbaBook> = {}
       const bookObservedAt: Record<string, string> = {}
       await Promise.all(chosen.map(async (market) => {
@@ -62,7 +64,26 @@ export default async function handler(request: Request, response: Response): Pro
       }))
       // Coverage includes all mapped inventory, not just the bounded orderbook subset.
       const ranked = rankOpeningNbaGame(mapped, inventory.markets, rawBooks, forecast, quantity)
+      const context = await contextPromise
+      const side = ranked.studySide
+      const matchingMarket = side && inventory.markets.find((market) => market.ticker === side.ticker && market.gameId === mapped.gameId)
+      const observedAt = new Date().toISOString()
+      const unknown = (detail: string): NbaFactor => ({ status: 'unknown', detail })
+      const meetings = recentNbaMeetings({ home: homeId, away: awayId, tip: event.date, neutral: competition.neutralSite }, history)
+      const factors = { ...context,
+        venueH2H: { status: 'verified', detail: `Venue ${competition.neutralSite ? 'neutral' : mapped.homeCity + ' home'}; ${meetings.length} prior meetings in the score archive. Context only, zero extra model weight.`,
+          source: snapshot.sources?.[0]?.url ?? scheduleSource, observedAt } as NbaFactor,
+        contractRules: matchingMarket && side?.rules === matchingMarket.rules_primary && side.rulesSecondary === matchingMarket.rules_secondary ? { status: 'verified', detail: 'Exact selected Kalshi ticker and primary/secondary rules observed; fair-price resolution remains possible.',
+          source: `${NBA_KALSHI_BASE}/markets/${encodeURIComponent(matchingMarket.ticker)}`, observedAt: inventory.observedAt } as NbaFactor : unknown('Exact selected contract text unavailable.'),
+        fairPrice: matchingMarket && /fair price/i.test(matchingMarket.rules_secondary) ? { status: 'verified', detail: 'Contract text permits fair-price resolution if the scheduled game does not start within the specified window; payout cannot be known in advance.',
+          source: `${NBA_KALSHI_BASE}/markets/${encodeURIComponent(matchingMarket.ticker)}`, observedAt: inventory.observedAt } as NbaFactor : unknown('Fair-price clause not confirmed in selected rules.'),
+        fees: side ? { status: 'estimated', detail: '7% general taker-fee formula applied to sized quote; exact series charges and hypothetical execution are not confirmed.',
+          source: 'https://kalshi.com/docs/kalshi-fee-schedule.pdf', observedAt } as NbaFactor : unknown('No sized side for fee estimate.'),
+        depth: side && rawBooks[side.ticker] && bookObservedAt[side.ticker] ? { status: 'verified', detail: `${quantity}-contract displayed orderbook depth was observed for this side and included in the sized price; not a fill guarantee.`,
+          source: `${NBA_KALSHI_BASE}/markets/${encodeURIComponent(side.ticker)}/orderbook`, observedAt: bookObservedAt[side.ticker] } as NbaFactor : unknown('Selected-side sized depth unavailable.'),
+        fillability: unknown('No real order is placed. Future depth, slippage and final executable price cannot be verified ahead of a fill.') }
       return { ...ranked, home: mapped.homeCity, away: mapped.awayCity, startsAt: event.date, forecast,
+        factors,
         inspected: chosen.map((m) => ({ ticker: m.ticker, source: `${NBA_KALSHI_BASE}/markets/${m.ticker}/orderbook`, book: rawBooks[m.ticker],
           observedAt: bookObservedAt[m.ticker] })) }
     }))

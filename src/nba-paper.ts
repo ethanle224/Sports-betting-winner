@@ -1,3 +1,5 @@
+import type { NbaFactor, NbaFactors } from '../server/nba-factors'
+
 export const NBA_FREEZE_KEY = 'edgeboard-nba-freezes-v1'
 export const NBA_REVIEW_KEY = 'edgeboard-nba-reviews-v1'
 
@@ -9,6 +11,8 @@ export type NbaScanGame = { gameId: string; home: string; away: string; startsAt
   coverage: { moneyline: number; spread: number; total: number }; qualifiedPaperPick: false;
   studySide: NbaStudySide | null; candidates?: NbaStudySide[]; pricedSides?: number; forecast: { model: string; [key: string]: unknown } | null;
   inspected: { ticker: string; source: string; observedAt: string; book: unknown }[];
+  factors?: Partial<NbaFactors & { venueH2H: NbaFactor; contractRules: NbaFactor; fairPrice: NbaFactor;
+    fees: NbaFactor; depth: NbaFactor; fillability: NbaFactor }>;
   checklist?: { mappedGame: boolean; modelScoreOnly?: boolean; injuryLineupVerified?: boolean; rulesVerified?: boolean;
     feeVerified?: boolean; executableDepthInspected?: boolean; settlementFairPriceRisk?: boolean } }
 export type NbaScan = { date: string; observedAt: string; marketObservedAt: string; quantity: number; historyObservedAt: string;

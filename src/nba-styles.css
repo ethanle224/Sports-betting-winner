@@ -52,6 +52,10 @@
 .nba-add-paper:disabled { opacity: .65; cursor: default; background: #143137; color: #86f7d4; }
 .nba-slip-count { margin: 18px 0; padding: 13px 16px; border: 1px solid #355162; color: #e7f4ee; font-size: 13px; }
 .nba-study-checks { padding-left: 18px; color: #a4b5bc; }
+.nba-factor-summary { margin: 10px 0 4px; color: #a4b5bc; font-size: 11px; }
+.nba-factor-details .nba-study-checks { margin: 10px 0; padding-left: 18px; }
+.nba-factor-details .nba-study-checks > li { padding: 6px 0; border-bottom: 1px solid #29404d; overflow-wrap: anywhere; }
+.nba-factor-details .nba-study-checks ul { padding-left: 16px; }
 .nba-freeze-panel { margin-top: 24px; padding: 22px; border: 1px solid #355162; background: #0c1a29; color: #d7e5df; }
 .nba-freeze-panel h3 { margin: 0 0 12px; color: #86f7d4; }
 .nba-evidence-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin: 18px 0; }

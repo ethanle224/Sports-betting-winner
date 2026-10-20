@@ -42,7 +42,8 @@ describe('NBA Kalshi opening-slate scanner', () => {
     await handler({ method: 'GET', query: { date: '2026-10-20', quantity: '10' }, headers: { cookie } }, res)
     expect(res.state.code).toBe(200)
     const body = res.state.payload as { games: { studySide: { ticker: string } | null; coverage: { spread: number; total: number };
-      qualifiedPaperPick: boolean; inspected: { observedAt: string }[]; candidates: { ticker: string }[] }[];
+      qualifiedPaperPick: boolean; inspected: { observedAt: string }[]; candidates: { ticker: string }[];
+      factors: Record<string, { status: string; detail: string; source?: string }> }[];
       sources: unknown; marketObservedAt: string; marketInventory: { ticker: string; raw: { ticker: string } }[] }
     expect(body.games).toHaveLength(3)
     expect(body.games.every((g) => g.studySide?.ticker.startsWith('KXNBAGAME-26OCT20') && !g.qualifiedPaperPick && g.coverage.spread === 0 && g.coverage.total === 0)).toBe(true)
@@ -52,6 +53,9 @@ describe('NBA Kalshi opening-slate scanner', () => {
     expect(Number.isFinite(Date.parse(body.marketObservedAt))).toBe(true)
     expect(body.games.every((g) => g.inspected.every((item) => Number.isFinite(Date.parse(item.observedAt))) &&
       g.candidates.length === g.coverage.spread + 4)).toBe(true)
+    expect(body.games[0].factors).toMatchObject({ injuries: { status: 'unknown' }, starters: { status: 'unknown' },
+      contractRules: { status: 'verified' }, fees: { status: 'estimated' }, depth: { status: 'verified' }, fillability: { status: 'unknown' } })
+    expect(body.games[0].factors.contractRules.source).toContain(body.games[0].studySide!.ticker)
     expect(fetcher.mock.calls.every(([, init]) => !JSON.stringify(init ?? {}).includes('KALSHI-ACCESS-KEY'))).toBe(true)
   })
   it('fails closed if the independent schedule no longer matches mapped teams', async () => {
@@ -67,13 +71,17 @@ describe('NBA Kalshi opening-slate scanner', () => {
     await handler({ method: 'GET', query: { date: '2026-10-20', quantity: '10' }, headers: { cookie } }, res)
     expect(res.state.code).toBe(200)
     const body = res.state.payload as { games: { gameId: string; studySide: { ticker: string } | null;
-      coverage: { moneyline: number; spread: number; total: number }; qualifiedPaperPick: boolean }[] }
+      coverage: { moneyline: number; spread: number; total: number }; qualifiedPaperPick: boolean;
+      factors: Record<string, { status: string }> }[] }
     expect(body.games.map((g) => g.gameId)).toEqual(['401909088', '401909089', '401909090'])
     expect(body.games.every((g) => !g.qualifiedPaperPick)).toBe(true)
+    expect(body.games.every((g) => g.factors.threes.status === 'verified' && g.factors.pace.status === 'estimated')).toBe(true)
     const frozen = freezeNbaStudy(res.state.payload as NbaScan, {}, new Date().toISOString())
     expect(frozen.decisions).toHaveLength(3)
     expect(frozen.decisions.every((decision) => decision.status === 'STUDY')).toBe(true)
     expect(frozen.scan.marketInventory.length).toBeGreaterThan(0)
-    console.log('Live read-only NBA coverage:', body.games.map((g) => ({ id: g.gameId, coverage: g.coverage, study: g.studySide?.ticker ?? null })))
+    console.log('Live read-only NBA evidence:', body.games.map((g) => ({ id: g.gameId, coverage: g.coverage,
+      study: g.studySide?.ticker ?? null, injuries: g.factors.injuries.status, threes: g.factors.threes.status,
+      pace: g.factors.pace.status, fees: g.factors.fees.status, fill: g.factors.fillability.status })))
   }, 30000)
 })
