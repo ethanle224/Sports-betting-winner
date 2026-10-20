@@ -7,7 +7,7 @@ export type NbaStudySide = { ticker: string; market: string; side: string; line:
   feeEstimate: number; allInCost: number; estimatedNetEdge: number; rules: string; rulesSecondary: string }
 export type NbaScanGame = { gameId: string; home: string; away: string; startsAt: string;
   coverage: { moneyline: number; spread: number; total: number }; qualifiedPaperPick: false;
-  studySide: NbaStudySide | null; forecast: { model: string; [key: string]: unknown } | null;
+  studySide: NbaStudySide | null; candidates?: NbaStudySide[]; pricedSides?: number; forecast: { model: string; [key: string]: unknown } | null;
   inspected: { ticker: string; source: string; observedAt: string; book: unknown }[];
   checklist?: { mappedGame: boolean; modelScoreOnly?: boolean; injuryLineupVerified?: boolean; rulesVerified?: boolean;
     feeVerified?: boolean; executableDepthInspected?: boolean; settlementFairPriceRisk?: boolean } }
@@ -105,12 +105,22 @@ export function readNbaReviews(storage: Storage): NbaReview[] {
   } catch { throw new Error('NBA review ledger is corrupt; export/recover it before writing') }
 }
 
+export function summarizeNbaHistory(freezes: NbaFreeze[], reviews: NbaReview[]) {
+  const entries = freezes.flatMap((freeze) => freeze.decisions.filter((decision) => decision.selected && decision.evidence?.requestedPaper)
+    .map((decision) => ({ freeze, decision, review: reviews.find((item) => item.id === `${freeze.id}:${decision.gameId}`) ?? null })))
+  return { entries, pending: entries.filter((entry) => !entry.review).length,
+    wins: entries.filter((entry) => entry.review?.outcome !== 'FAIR_PRICE' && entry.review?.payout === 1).length,
+    losses: entries.filter((entry) => entry.review?.outcome !== 'FAIR_PRICE' && entry.review?.payout === 0).length,
+    fairPrice: entries.filter((entry) => entry.review?.outcome === 'FAIR_PRICE').length,
+    simulatedNetUnits: entries.reduce((sum, entry) => sum + (entry.review?.simulatedNetUnits ?? 0), 0) }
+}
+
 export function appendNbaReview(storage: Storage, input: NbaReviewInput, nowIso = new Date().toISOString()): NbaReview {
   const frozen = readNbaFreezes(storage).find((item) => item.id === input.scanId)
   if (!frozen) throw new Error('No frozen NBA scan for review')
   const decision = frozen.decisions.find((item) => item.gameId === input.gameId)
   const game = frozen.scan.games.find((item) => item.gameId === input.gameId)
-  if (decision?.status !== 'PAPER_EXPERIMENT' || !decision.selected || !game) throw new Error('No frozen paper experiment for this game')
+  if (!decision?.evidence?.requestedPaper || !decision.selected || !game) throw new Error('No requested frozen paper experiment for this game')
   const observed = Date.parse(input.observedAt)
   if (!Number.isFinite(observed) || observed <= Date.parse(game.startsAt)) throw new Error('Cannot settle before game tip')
   if (!Number.isFinite(Date.parse(nowIso)) || observed > Date.parse(nowIso)) throw new Error('Review observation cannot be in the future')

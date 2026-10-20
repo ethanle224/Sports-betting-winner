@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { offseasonExamples } from './nba-offseason'
 import { nbaLineChance, type NbaForecast } from '../server/nba-model'
 import NbaFreezePanel from './NbaFreezePanel'
-import type { NbaScan } from './nba-paper'
+import type { NbaScan, NbaScanGame, NbaStudySide } from './nba-paper'
 
 type Team = { id: string; name: string; abbreviation: string; pointsFor: number; pointsAgainst: number; wins: number; losses: number }
 type Meeting = { id: string; tip: string; homeId: string; awayId: string; homeScore: number; awayScore: number; neutral: boolean }
@@ -11,13 +11,30 @@ type Game = { id: string; home: string; away: string; homeId: string; awayId: st
   neutral?: boolean; forecast?: NbaForecast | null; meetings?: Meeting[]; venueContext?: { home: VenueRecord; awayRoad: VenueRecord } }
 type Research = { date: string; observedAt: string; priorSeason: string; teams: Team[]; games: Game[];
   historyObservedAt?: string; sources: { standings: string; schedule: string; history?: { url: string; sha256: string }[] }; ratingsStatus: string; forecastStatus: string }
-type StudyGame = { gameId: string; home: string; away: string; startsAt: string; coverage: { moneyline: number; spread: number; total: number };
-  pricedSides: number; qualifiedPaperPick: false; studySide: null | { ticker: string; market: string; side: 'yes' | 'no'; line: number | null;
-    probability: number; price: number; feeEstimate: number; allInCost: number; estimatedNetEdge: number; rules: string; rulesSecondary: string };
-  forecast: { model: string; [key: string]: unknown } | null; inspected: { ticker: string; source: string; observedAt: string; book: unknown }[];
-  checklist: { mappedGame: boolean; modelScoreOnly: boolean; injuryLineupVerified: boolean; rulesVerified: boolean;
-    feeVerified: boolean; executableDepthInspected: boolean; settlementFairPriceRisk: boolean } }
-type KalshiStudy = NbaScan & { games: StudyGame[]; sources: { schedule: string; markets: string; feeSchedule: string } }
+type KalshiStudy = NbaScan & { sources: { schedule: string; markets: string; feeSchedule: string } }
+
+function sideLabel(side: NbaStudySide, game: NbaScanGame): string {
+  if (side.market === 'total' && side.line !== null) return `${side.side === 'no' ? 'Under' : 'Over'} ${side.line}`
+  const win = /^If (.+?) wins by more than ([\d.]+) points\b/.exec(side.rules)
+  if (side.market === 'spread' && win && side.line !== null) {
+    const team = side.side === 'yes' ? win[1] : win[1] === game.home ? game.away : game.home
+    return `${team} ${side.side === 'yes' ? '-' : '+'}${side.line}`
+  }
+  const winner = /^If (.+?) wins\b/.exec(side.rules)
+  if (side.market === 'moneyline' && winner) return `${side.side === 'yes' ? winner[1] : winner[1] === game.home ? game.away : game.home} winner`
+  return `${side.side.toUpperCase()} · ${side.ticker}`
+}
+
+function PricedOption({ side, game, leading = false }: { side: NbaStudySide; game: NbaScanGame; leading?: boolean }) {
+  return <div className="nba-priced-option"><strong>{sideLabel(side, game)}</strong> <span className="nba-option-status">{leading ? 'TOP STUDY · ' : ''}NOT QUALIFIED</span>
+    <p><code>{side.ticker}</code> · {side.side.toUpperCase()} · {side.market} · 10 paper contracts</p>
+    <p>Score-only model {(side.probability * 100).toFixed(1)}% · sized quote {(side.price * 100).toFixed(1)}¢ + estimated fee {(side.feeEstimate / 10 * 100).toFixed(2)}¢ per contract · all-in {(side.allInCost * 100).toFixed(2)}¢ · model–cost gap {(side.estimatedNetEdge * 100).toFixed(2)} pp.</p>
+    <details><summary>Reasoning &amp; risks — {sideLabel(side, game)}</summary>
+      <p>Ranked by score-only probability minus estimated all-in cost at this scan, not by preseason results or a validated edge. A positive model–cost gap is not a profit forecast. This side pays $1 only if its exact {side.side.toUpperCase()} contract outcome occurs; displayed book depth is not a fill.</p>
+      <p>Still unverified: injuries, starters, roster-adjusted matchup, pace, threes, ball movement, current fees, and final fillability. Rerun the scan before tip. Venue and recent head-to-head are context, not extra numerical weight.</p>
+      <p>Exact rule: {side.rules}</p><p>{side.rulesSecondary}</p>
+    </details></div>
+}
 
 export default function NbaResearch({ onLogout }: { onLogout: () => Promise<void> }) {
   const [date, setDate] = useState('2026-10-20')
@@ -31,6 +48,7 @@ export default function NbaResearch({ onLogout }: { onLogout: () => Promise<void
   const [study, setStudy] = useState<KalshiStudy | null>(null)
   const [scanBusy, setScanBusy] = useState(false)
   const [scanError, setScanError] = useState('')
+  const [nbaView, setNbaView] = useState<'scan' | 'history'>('scan')
   async function scanOpeningSlate() {
     setStudy(null); setScanError(''); setScanBusy(true)
     try {
@@ -101,15 +119,19 @@ export default function NbaResearch({ onLogout }: { onLogout: () => Promise<void
       {home && away && <div className="nba-moves"><h3>Selected moves involving {away.abbreviation} / {home.abbreviation}</h3>{relevantMoves.length ? <ul>{relevantMoves.map((move) => <li key={move.move}><time dateTime={move.date}>{move.date}</time><strong>{move.move}</strong><a href={move.source} target="_blank" rel="noreferrer">{move.sourceLabel} ↗</a></li>)}</ul> : <p className="help">No move in this limited selection; check the full trackers. This does not mean either roster is unchanged.</p>}</div>}
       <div className="nba-source-grid"><a href="https://www.nba.com/news/nba-offseason-deals-2026" target="_blank" rel="noreferrer">Official 2026 offseason deals<span>Trades · signings · departures by team ↗</span></a><a href="https://www.nba.com/news/2026-offseason-trade-tracker" target="_blank" rel="noreferrer">NBA trade tracker<span>Official transaction detail ↗</span></a><a href="https://www.nba.com/freeagents/2026" target="_blank" rel="noreferrer">NBA free agency hub<span>Signings and reporting ↗</span></a><a href="https://official.nba.com/" target="_blank" rel="noreferrer">NBA official reports<span>Confirm current injury availability ↗</span></a></div></section>
     <section className="board" aria-label="October 20 Kalshi study checklist"><p className="eyebrow">04 / KALSHI · OPENING SLATE</p><h2>Three games, three-market checklist</h2>
+      <div className="nba-view-tabs" role="tablist" aria-label="NBA paper workspace"><button type="button" role="tab" aria-selected={nbaView === 'scan'} onClick={() => setNbaView('scan')}>Scan &amp; choices</button><button type="button" role="tab" aria-selected={nbaView === 'history'} onClick={() => setNbaView('history')}>Bet history</button></div>
+      {nbaView === 'scan' && <>
       <p className="help">Public read-only Kalshi data; no key or order permissions used. A study side is the highest estimated return at this instant using the unadjusted scores-only model, not an eligible bet. The fee and win-probability assumptions can be wrong.</p>
       {date === '2026-10-20' ? <button type="button" disabled={scanBusy} onClick={() => void scanOpeningSlate()}>{scanBusy ? 'Scanning Kalshi…' : 'Scan Kalshi opening slate'}</button> : <p className="help">Exact Kalshi mapping is available for October 20 only; choose that date to scan.</p>}
       {scanError && <p role="alert">{scanError}</p>}
       {study && date === '2026-10-20' && <><p className="help">Observed {new Date(study.observedAt).toLocaleString()} · 10 whole contracts per inspected side · quotes may change before tip. <a href={study.sources.markets} target="_blank" rel="noreferrer">Kalshi public markets</a> · <a href={study.sources.feeSchedule} target="_blank" rel="noreferrer">fee schedule</a></p>
         <div className="nba-study-grid">{study.games.map((item) => <article key={item.gameId} className="nba-study-card"><h3>{item.away} @ {item.home}</h3>
           <p>Listed full-game contracts — ML: {item.coverage.moneyline} · Spread: {item.coverage.spread} · Total: {item.coverage.total}. {item.coverage.spread === 0 || item.coverage.total === 0 ? 'Missing market families are not simulated.' : ''}</p>
-          {item.studySide ? <><strong>Study side · not a qualified bet</strong><p><code>{item.studySide.ticker}</code> · {item.studySide.side.toUpperCase()} · {item.studySide.market}{item.studySide.line === null ? '' : ` ${item.studySide.line}`}</p>
-            <p>Experimental chance {(item.studySide.probability * 100).toFixed(1)}% · sized book cost {(item.studySide.price * 100).toFixed(1)}¢ + estimated fee · estimated all-in {(item.studySide.allInCost * 100).toFixed(1)}¢. Model − cost {(item.studySide.estimatedNetEdge * 100).toFixed(1)} pp; not a validated edge.</p>
-            <details><summary>Exact market resolution text</summary><p>{item.studySide.rules}</p><p>{item.studySide.rulesSecondary}</p></details></> : <p>No sized book/model comparison available. No study side invented.</p>}
+          {item.studySide ? <><p><strong>Study side · not a qualified bet</strong></p><PricedOption side={item.studySide} game={item} leading />
+            <details><summary>Other priced options ({Math.max(0, (item.candidates?.length ?? 1) - 1)})</summary>
+              {(item.candidates ?? []).filter((candidate) => candidate.ticker !== item.studySide?.ticker || candidate.side !== item.studySide?.side).map((candidate) =>
+                <PricedOption key={`${candidate.ticker}:${candidate.side}`} side={candidate} game={item} />)}</details></> : <p>No sized book/model comparison available. No study side invented.</p>}
+          <p className="help">{item.candidates?.length ?? (item.studySide ? 1 : 0)} priced options inspected from selected lines · listed contracts are not all priced or qualified.</p>
           <ul className="nba-study-checks"><li>Game mapped: {item.checklist?.mappedGame ? 'verified against schedule' : 'unverified'}</li>
             <li>Offense vs defense and pace: raw scoring included; opponent-adjusted ratings and possessions unverified</li>
             <li>Three-point attempts, makes and opponent defense: unverified</li><li>Assists, touches and chemistry: unverified</li>
@@ -117,7 +139,8 @@ export default function NbaResearch({ onLogout }: { onLogout: () => Promise<void
             <li>Injury and expected lineup: unverified</li><li>Contract resolution / fair-price risk: unverified</li>
             <li>Final fee and fillability: unverified; current displayed depth is not a fill</li></ul>
         </article>)}</div></>}
-      <NbaFreezePanel key={study?.observedAt ?? 'no-scan'} scan={study} />
+      </>}
+      <NbaFreezePanel key={study?.observedAt ?? 'no-scan'} scan={study} view={nbaView} />
     </section>
     <section className="pick-zone" aria-label="NBA paper decisions"><p className="eyebrow">05 / DECISIONS</p><h2>No qualified NBA picks yet</h2><p>The opening scan ranks study sides, not qualified bets. Sourced, frozen paper experiments appear in the NBA audit above, but they do not establish a validated edge. Before even a paper experiment: confirm current injuries and starters, exact contract/rules including fair-price scenarios, current fee schedule and sufficiently fresh sized depth. Freeze independent model, quote, evidence and rationale before tip. NFL bankroll and risk rules do not transfer.</p></section>
     <footer>NBA PRIORITY · EXPERIMENTAL PROBABILITIES · NO QUALIFIED PICKS OR REAL ORDERS</footer>

@@ -65,5 +65,15 @@
 .nba-freeze-history li { padding: 6px 0; font-size: 12px; line-height: 1.5; }
 .nba-freeze-history strong { color: #86f7d4; }
 .nba-review-form { margin: 14px 0; }
+.nba-view-tabs { display: flex; gap: 8px; margin: 18px 0; border-bottom: 1px solid #355162; }
+.nba-view-tabs button { cursor: pointer; border: 1px solid #355162; border-bottom: 0; background: #0c1a29; color: #a4b5bc; padding: 11px 16px; font: 700 12px 'DM Mono', monospace; }
+.nba-view-tabs button[aria-selected='true'] { background: #143137; color: #86f7d4; border-color: #86f7d4; }
+.nba-view-tabs button:focus-visible, .nba-priced-option summary:focus-visible { outline: 2px solid #86f7d4; outline-offset: 2px; }
+.nba-priced-option { border-top: 1px solid #355162; padding: 12px 0; overflow-wrap: anywhere; }
+.nba-priced-option > strong { font-size: 19px; }
+.nba-option-status { display: inline-block; margin-left: 8px; font: 10px 'DM Mono', monospace; color: #f9c784; }
+.nba-priced-option p { color: #c6d5d4; }
+.nba-history-stats { display: flex; flex-wrap: wrap; gap: 10px; margin: 18px 0; }
+.nba-history-stats strong { padding: 12px; border: 1px solid #355162; color: #86f7d4; background: #102334; font: 700 12px 'DM Mono', monospace; }
 @media (max-width: 700px) { .nba-research .risk-card { width: 100%; } .nba-source-grid { grid-template-columns: 1fr; } .nba-moves li { grid-template-columns: 1fr; gap: 5px; } .sport-tabs { padding-top: 14px; } }
 @media (max-width: 1050px) { .nba-study-grid, .nba-evidence-grid { grid-template-columns: 1fr; } }

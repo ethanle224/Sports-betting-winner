@@ -21,6 +21,19 @@ const scan = { date: '2026-10-20', quantity: 10, observedAt: '2026-10-07T02:30:0
     game('401909089', 'Philadelphia', 'New York', 'KXNBAGAME-26OCT20PHINYK-PHI'),
     game('401909090', 'Oklahoma City', 'San Antonio', 'KXNBAGAME-26OCT20OKCSAS-SAS')] }
 
+const pricedScan = { ...scan, games: scan.games.map((item, index) => {
+  const choice = index === 0 ? { ticker: 'KXNBASPREAD-26OCT20BOSDET-BOS2', market: 'spread', side: 'no', line: 1.5,
+    probability: .603, price: .51, feeEstimate: .175, allInCost: .5275, estimatedNetEdge: .0755,
+    rules: 'If Boston wins by more than 1.5 points in the Boston vs Detroit game, then Yes.', rulesSecondary: 'Postponed games may settle fair price.' }
+    : index === 1 ? { ticker: 'KXNBATOTAL-26OCT20PHINYK-229', market: 'total', side: 'no', line: 228.5,
+      probability: .551, price: .42, feeEstimate: .1706, allInCost: .43706, estimatedNetEdge: .11394,
+      rules: 'If over 228.5 total points are scored in the Philadelphia vs New York game, then Yes.', rulesSecondary: 'Postponed games may settle fair price.' }
+      : { ticker: 'KXNBASPREAD-26OCT20OKCSAS-SAS5', market: 'spread', side: 'yes', line: 4.5,
+        probability: .502, price: .41, feeEstimate: .1694, allInCost: .42694, estimatedNetEdge: .07506,
+        rules: 'If San Antonio wins by more than 4.5 points in the Oklahoma City vs San Antonio game, then Yes.', rulesSecondary: 'Postponed games may settle fair price.' }
+  return { ...item, studySide: choice, candidates: [choice, { ...choice, ticker: `${choice.ticker}-ALT`, side: choice.side === 'yes' ? 'no' : 'yes', estimatedNetEdge: -.02 }] }
+}) }
+
 describe('October 20 NBA Kalshi checklist', () => {
   afterEach(() => vi.restoreAllMocks())
   it('shows an opt-in read-only scan with three study sides, missing spread/total markets and pending gates', async () => {
@@ -58,5 +71,29 @@ describe('October 20 NBA Kalshi checklist', () => {
     expect(evidence.value).toContain('official.nba.com')
     fireEvent.click(screen.getByRole('button', { name: 'Scan Kalshi opening slate' }))
     await waitFor(() => expect(screen.getAllByLabelText('Availability source URL')[0]).toHaveValue(''))
+  })
+  it('shows each inspected priced option in plain language with expandable reasoning and honest qualification', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => ({ ok: true, json: async () => String(url).includes('nba-scan') ? pricedScan : research }) as Response)
+    render(<NbaResearch onLogout={vi.fn()} />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Scan Kalshi opening slate' }))
+    const panel = await screen.findByRole('region', { name: 'October 20 Kalshi study checklist' })
+    expect(within(panel).getByText('Detroit +1.5')).toBeInTheDocument()
+    expect(within(panel).getByText('Under 228.5')).toBeInTheDocument()
+    expect(within(panel).getByText('San Antonio -4.5')).toBeInTheDocument()
+    expect(within(panel).getAllByText(/2 priced options inspected/)).toHaveLength(3)
+    expect(within(panel).getAllByText(/Not qualified/i).length).toBeGreaterThan(0)
+    const details = within(panel).getAllByText(/Why this side|Reasoning & risks/i)[0]
+    fireEvent.click(details)
+    expect(within(panel).getAllByText(/score-only probability minus estimated all-in cost/i).length).toBeGreaterThan(0)
+    expect(within(panel).getAllByText(/Other priced options/)).toHaveLength(3)
+  })
+  it('switches to an NBA-only bet history tab even without a current scan', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue({ ok: true, json: async () => research } as Response)
+    render(<NbaResearch onLogout={vi.fn()} />)
+    fireEvent.click(screen.getByRole('tab', { name: 'Bet history' }))
+    expect(screen.getByText(/No requested paper sides frozen yet/)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Scan Kalshi opening slate' })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('tab', { name: 'Scan & choices' }))
+    expect(await screen.findByRole('button', { name: 'Scan Kalshi opening slate' })).toBeInTheDocument()
   })
 })
