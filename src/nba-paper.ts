@@ -119,9 +119,15 @@ export function trackNbaPick(storage: Storage, scan: NbaScan, gameId: string, no
   if (!game?.studySide) throw new Error('No priced paper pick for this game')
   const evidence: NbaEvidence = { requestedPaper: true, availabilitySource: '', availabilityObservedAt: '',
     availabilityNotes: '', rulesSource: '', feeSource: '', uncertaintyAccepted: false, rationale: '' }
-  // Validate scan freshness, all selected-date games and the pre-tip boundary even
-  // for the one-click path. Other games are retained for audit but not requested.
-  const snapshot = freezeNbaStudy(scan, { [gameId]: evidence }, nowIso)
+  // Validate the full slate first, then retain only evidence that informed this
+  // clicked decision. A whole-slate copy per game grows far beyond browser quota.
+  freezeNbaStudy(scan, { [gameId]: evidence }, nowIso)
+  const pickedScan: NbaScan = { date: scan.date, observedAt: scan.observedAt,
+    marketObservedAt: scan.marketObservedAt, quantity: scan.quantity, historyObservedAt: scan.historyObservedAt,
+    status: scan.status, sources: scan.sources, series: scan.series,
+    marketInventory: scan.marketInventory.filter((market) => (market as { ticker?: string })?.ticker === game.studySide?.ticker),
+    games: [game] }
+  const snapshot = freezeNbaStudy(pickedScan, { [gameId]: evidence }, nowIso)
   const chosen = snapshot.decisions.find((decision) => decision.gameId === gameId)
   if (!chosen?.selected || chosen.reasons.some((reason) =>
     ['Independent score forecast missing', 'Raw sized orderbook missing or stale',

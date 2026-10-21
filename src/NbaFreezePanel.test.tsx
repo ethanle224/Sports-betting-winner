@@ -113,4 +113,42 @@ describe('NBA opening-slate freeze UI', () => {
     expect(screen.getByText(/Losses: 1/)).toBeInTheDocument()
     expect(screen.getByText(/Pending: 0/)).toBeInTheDocument()
   })
+  it('automatically audits only the tracked finalized paper pick and shows cause uncertainty and next-slate checks', async () => {
+    const frozen = freezeNbaStudy({ ...scan, games: scan.games.map((game, index) => index ? game : { ...game,
+      forecast: { model: 'nba-scores-v1', expectedMargin: -3, expectedTotal: 220 },
+      factors: { starters: { status: 'unknown' as const, detail: 'Unconfirmed' } } }) },
+    { '401909088': { requestedPaper: true, availabilitySource: '', availabilityObservedAt: '', availabilityNotes: '',
+      rulesSource: '', feeSource: '', uncertaintyAccepted: false, rationale: '' } }, now.toISOString())
+    appendNbaFreeze(localStorage, frozen)
+    vi.setSystemTime(new Date('2026-10-21T04:05:00Z'))
+    const fetcher = vi.spyOn(globalThis, 'fetch').mockResolvedValue({ ok: true, json: async () => ({
+      state: 'finalized', date: '2026-10-20', gameId: '401909088', ticker: side.ticker, result: 'NO', payoutYes: 0,
+      observedAt: '2026-10-21T04:00:00Z', scores: { home: 121, away: 113 },
+      rulesPrimary: side.rules, rulesSecondary: side.rulesSecondary,
+      marketSource: `https://external-api.kalshi.com/trade-api/v2/markets/${side.ticker}`,
+      scheduleSource: 'https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard?dates=20261020',
+    }) } as Response)
+    render(<NbaFreezePanel scan={null} view="history" />)
+    fireEvent.click(screen.getByRole('button', { name: 'Audit finished picks' }))
+    expect(await screen.findByText(/cause cannot be established from one result/i)).toBeInTheDocument()
+    expect(screen.getByText(/Losses: 1/)).toBeInTheDocument()
+    expect(screen.getByText(/Actual: Detroit 121.*Boston 113/)).toBeInTheDocument()
+    expect(screen.getByText(/Collect timestamped verified lineup/)).toBeInTheDocument()
+    expect(JSON.parse(localStorage.getItem('edgeboard-nba-audits-v1') ?? '[]')).toHaveLength(1)
+    expect(JSON.parse(localStorage.getItem('edgeboard-nba-reviews-v1') ?? '[]')).toHaveLength(1)
+    expect(fetcher).toHaveBeenCalledWith(expect.stringContaining(`/api/nba-audit?date=2026-10-20&gameId=401909088&ticker=${side.ticker}`), expect.objectContaining({ credentials: 'same-origin' }))
+    expect(JSON.parse(localStorage.getItem('edgeboard-nba-freezes-v1') ?? '[]')[0]).toEqual(frozen)
+  })
+  it('keeps a live/unfinalized contract pending and tells the operator to retry', async () => {
+    const frozen = freezeNbaStudy(scan, { '401909088': { requestedPaper: true, availabilitySource: '', availabilityObservedAt: '',
+      availabilityNotes: '', rulesSource: '', feeSource: '', uncertaintyAccepted: false, rationale: '' } }, now.toISOString())
+    appendNbaFreeze(localStorage, frozen)
+    vi.setSystemTime(new Date('2026-10-21T04:05:00Z'))
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue({ ok: true, json: async () => ({ state: 'pending', reason: 'Kalshi contract not finalized' }) } as Response)
+    render(<NbaFreezePanel scan={null} view="history" />)
+    fireEvent.click(screen.getByRole('button', { name: 'Audit finished picks' }))
+    expect(await screen.findByText(/1 pending.*retry/i)).toBeInTheDocument()
+    expect(screen.getByText(/Pending: 1/)).toBeInTheDocument()
+    expect(localStorage.getItem('edgeboard-nba-reviews-v1')).toBeNull()
+  })
 })

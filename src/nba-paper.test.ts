@@ -45,6 +45,15 @@ describe('NBA paper-only opening-slate freeze', () => {
     const noBook = { ...scan, games: scan.games.map((game, index) => index ? game : { ...game, inspected: [] }) }
     expect(() => trackNbaPick({ getItem: () => null, setItem: () => {} }, noBook, '401909088', now)).toThrow(/priced|book/i)
   })
+  it('keeps decision-time evidence for the clicked game without cloning the entire slate into every daily pick', () => {
+    const storage = { getItem: () => null, setItem: () => {} }
+    const long = { ...scan, marketInventory: [scan.marketInventory[0], { ticker: 'UNRELATED', filler: 'x'.repeat(100_000) }],
+      games: scan.games.map((game, index) => index === 0 ? game : { ...game, inspected: [{ ticker: 'UNRELATED', observedAt: now, source: 'https://example.com', book: 'x'.repeat(100_000) }] }) }
+    const record = trackNbaPick(storage, long, '401909088', now)
+    expect(record.scan.games.map((game) => game.gameId)).toEqual(['401909088'])
+    expect(record.scan.marketInventory).toEqual([scan.marketInventory[0]])
+    expect(JSON.stringify(record)).not.toContain('UNRELATED')
+  })
   it('preserves every game and the full raw scan, with rejected sides honestly marked', () => {
     const frozen = freezeNbaStudy(scan, {}, now)
     expect(frozen.scan).toEqual(scan)

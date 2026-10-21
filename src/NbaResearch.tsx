@@ -2,7 +2,9 @@ import { useEffect, useRef, useState } from 'react'
 import { offseasonExamples } from './nba-offseason'
 import { nbaLineChance, type NbaForecast } from '../server/nba-model'
 import NbaFreezePanel from './NbaFreezePanel'
-import { nbaSideLabel, readNbaFreezes, trackNbaPick, type NbaScan, type NbaScanGame, type NbaStudySide } from './nba-paper'
+import { NBA_FREEZE_KEY, NBA_REVIEW_KEY, nbaSideLabel, trackNbaPick, type NbaScan, type NbaScanGame, type NbaStudySide } from './nba-paper'
+import { NBA_AUDIT_KEY } from './nba-audit'
+import { cloudValidationStorage, loadNbaCloudLedger, saveNbaCloudRecord, type NbaCloudLedger } from './nba-cloud-ledger'
 import type { NbaFactor } from '../server/nba-factors'
 
 type Team = { id: string; name: string; abbreviation: string; pointsFor: number; pointsAgainst: number; wins: number; losses: number }
@@ -75,18 +77,41 @@ export default function NbaResearch({ onLogout }: { onLogout: () => Promise<void
   const scanSequence = useRef(0)
   const [scanError, setScanError] = useState('')
   const [nbaView, setNbaView] = useState<'scan' | 'history'>('scan')
-  const [tracked, setTracked] = useState<string[]>(() => {
-    try { return readNbaFreezes(localStorage).flatMap((record) => record.decisions.filter((decision) => decision.selected && decision.evidence?.requestedPaper).map((decision) => decision.gameId)) }
-    catch { return [] }
-  })
+  const [cloud, setCloud] = useState<NbaCloudLedger | null>(null)
+  const [cloudError, setCloudError] = useState('')
+  const [tracked, setTracked] = useState<string[]>([])
   const [ledgerRevision, setLedgerRevision] = useState(0)
   const [trackError, setTrackError] = useState('')
-  function trackPick(gameId: string) {
-    if (!study) return
+  function downloadLegacyBackup() {
     try {
-      trackNbaPick(localStorage, study, gameId, new Date().toISOString())
+      const payload = { freezes: localStorage.getItem(NBA_FREEZE_KEY), reviews: localStorage.getItem(NBA_REVIEW_KEY), audits: localStorage.getItem(NBA_AUDIT_KEY) }
+      const url = URL.createObjectURL(new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' }))
+      const link = document.createElement('a'); link.href = url; link.download = 'edgeboard-nba-legacy-backup.json'; link.click()
+      setTimeout(() => URL.revokeObjectURL(url), 1000)
+    } catch { setCloudError('Could not export legacy browser records; do not clear this browser data') }
+  }
+  const tracking = useRef(new Set<string>())
+  const [trackingId, setTrackingId] = useState('')
+  useEffect(() => {
+    let active = true
+    loadNbaCloudLedger().then((ledger) => {
+      if (!active) return
+      setCloud(ledger)
+      setTracked(ledger.freezes.flatMap((record) => record.decisions.filter((decision) => decision.selected && decision.evidence?.requestedPaper).map((decision) => decision.gameId)))
+      setCloudError('')
+    }).catch((failure) => { if (active) setCloudError(failure instanceof Error ? failure.message : 'Cloud ledger unavailable') })
+    return () => { active = false }
+  }, [])
+  async function trackPick(gameId: string) {
+    if (!study || !cloud || tracking.current.has(gameId)) return
+    tracking.current.add(gameId); setTrackingId(gameId)
+    try {
+      const record = trackNbaPick(cloudValidationStorage(cloud), study, gameId, new Date().toISOString())
+      await saveNbaCloudRecord('freeze', record)
+      setCloud((old) => old ? { ...old, freezes: [...old.freezes, record] } : old)
       setTracked((old) => [...old, gameId]); setLedgerRevision((old) => old + 1); setTrackError('')
     } catch (failure) { setTrackError(failure instanceof Error ? failure.message : 'Paper pick not saved') }
+    finally { tracking.current.delete(gameId); setTrackingId('') }
   }
   function changeDate(next: string) {
     scanSequence.current++
@@ -141,16 +166,17 @@ export default function NbaResearch({ onLogout }: { onLogout: () => Promise<void
     <header className="topbar"><a className="brand" href="#nba-research" aria-label="Edgeboard NBA home"><span className="brand-mark">E</span><span>EDGEBOARD</span></a><div className="topbar-actions"><span className="status">NBA PAPER RESEARCH · NO REAL ORDERS</span><button className="logout" type="button" onClick={() => void onLogout()}>Log out</button></div></header>
     <section className="board nba-paper-workspace" aria-label="NBA slate study checklist"><p className="eyebrow">01 / NBA PAPER DESK</p><h2>Scan slate &amp; track results</h2>
       {nbaView === 'scan' && <>
-      <p className="help">Scan, pick a side, tap Track. Each click saves one pending 1u paper study in this browser. Not a qualified edge or real order.</p>
+      <p className="help">Scan, pick a side, tap Track. Each confirmed click saves one pending 1u paper study to the signed-in cloud ledger. Old browser records are migrated without deleting them. Not a qualified edge or real order.</p>
       <div className="scan-controls"><label>Scan game date<input type="date" min="2026-10-20" max="2027-04-11" value={date} onChange={(event) => changeDate(event.target.value)} /></label>
         <button type="button" disabled={scanBusy || !date} onClick={() => void scanSlate()}>{scanBusy ? 'Scanning Kalshi…' : 'Scan slate'}</button></div>
       {scanError && <p role="alert">{scanError}</p>}{trackError && <p role="alert">{trackError}</p>}
+      {cloudError && <><p role="alert">{cloudError}. Browser records remain intact; export them before clearing site data.</p><button type="button" onClick={downloadLegacyBackup}>Download legacy browser backup</button></>}
       {study && study.date === date && <><p className="help">{study.date} slate · observed {new Date(study.observedAt).toLocaleString()} · 10 whole contracts per inspected side · quotes may change before tip. <a href={study.sources.markets} target="_blank" rel="noreferrer">Kalshi public markets</a> · <a href={study.sources.feeSchedule} target="_blank" rel="noreferrer">fee schedule</a></p>
         {!study.games.length && <p className="help">No regular-season NBA games on this date. No paper choices.</p>}
         <div className="nba-study-grid">{study.games.map((item) => <article key={item.gameId} className="nba-study-card"><h3>{item.away} @ {item.home}</h3>
           {item.studySide ? <><p><strong>Study side · not a qualified bet</strong></p><PricedOption side={item.studySide} game={item} leading />
-            <button className="nba-add-paper" type="button" disabled={tracked.includes(item.gameId)} onClick={() => trackPick(item.gameId)}>
-              {tracked.includes(item.gameId) ? `${nbaSideLabel(item.studySide, item)} tracked · see history` : `Track ${nbaSideLabel(item.studySide, item)} as paper pick · 1u`}
+            <button className="nba-add-paper" type="button" disabled={!cloud || tracked.includes(item.gameId) || trackingId === item.gameId} onClick={() => void trackPick(item.gameId)}>
+              {tracked.includes(item.gameId) ? `${nbaSideLabel(item.studySide, item)} tracked · see history` : trackingId === item.gameId ? 'Saving paper pick…' : `Track ${nbaSideLabel(item.studySide, item)} as paper pick · 1u`}
             </button>
             <details><summary>Other priced options ({Math.max(0, (item.candidates?.length ?? 1) - 1)})</summary>
               {(item.candidates ?? []).filter((candidate) => candidate.ticker !== item.studySide?.ticker || candidate.side !== item.studySide?.side).map((candidate) =>
@@ -162,7 +188,7 @@ export default function NbaResearch({ onLogout }: { onLogout: () => Promise<void
           <p>Game mapped: {item.checklist?.mappedGame ? 'verified against schedule' : 'unverified'}. Rest, travel and current-roster continuity remain unmodeled. Open Evidence &amp; gaps for each sourced status.</p></details>
         </article>)}</div></>}
       </>}
-      {nbaView === 'history' && <NbaFreezePanel key={`history-${ledgerRevision}`} scan={null} view="history" />}
+      {nbaView === 'history' && (cloud ? <NbaFreezePanel key={`history-${ledgerRevision}`} scan={null} view="history" cloudLedger={cloud} onCloudChange={setCloud} /> : <><p role="status">{cloudError ? 'NBA cloud ledger unavailable; history is not empty, but cannot be loaded.' : 'Loading NBA paper ledger…'}</p>{cloudError && <button type="button" onClick={downloadLegacyBackup}>Download legacy browser backup</button>}</>)}
     </section>
     <section className="hero"><div><p className="eyebrow">NBA / 2026–27 · PAPER RESEARCH ONLY</p><h1>A baseline.<br /><em>Not a promise.</em></h1><p className="lede">Our priority is net units after costs, not a promised win percentage. Scores-only probabilities are experimental; they are not a betting edge. NFL forecasts, rules and paper records stay in their own tab.</p></div><aside className="risk-card"><span>DECISION STATUS</span><strong>Paper studies, not qualified picks</strong><div>The choices above are live-scan research leads. Current lineups, exact costs and prospective profitability remain unverified.</div></aside></section>
     <section className="board" aria-labelledby="matchups-heading"><p className="eyebrow">02 / MATCHUP DESK</p><h2 id="matchups-heading">Upcoming regular-season slate</h2>

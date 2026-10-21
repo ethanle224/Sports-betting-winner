@@ -1,6 +1,13 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import NbaResearch from './NbaResearch'
+import type { NbaFreeze } from './nba-paper'
+const cloudStore = vi.hoisted(() => ({ freezes: [] as NbaFreeze[] }))
+vi.mock('./nba-cloud-ledger', async (importOriginal) => {
+  const original = await importOriginal<typeof import('./nba-cloud-ledger')>()
+  return { ...original, loadNbaCloudLedger: async () => ({ freezes: [...cloudStore.freezes], reviews: [], audits: [] }),
+    saveNbaCloudRecord: async (kind: string, record: NbaFreeze) => { if (kind === 'freeze') cloudStore.freezes.push(record); return record } }
+})
 
 const research = { date: '2026-10-20', observedAt: '2026-10-06T04:00:00Z', priorSeason: '2025-26', teams: [], games: [],
   sources: { standings: 'https://site.api.espn.com/standings', schedule: 'https://site.api.espn.com/scoreboard' },
@@ -45,7 +52,7 @@ const pricedScan = { ...scan, games: scan.games.map((item, index) => {
 }) }
 
 describe('October 20 NBA Kalshi checklist', () => {
-  beforeEach(() => { vi.useFakeTimers({ shouldAdvanceTime: true }); vi.setSystemTime(new Date('2026-10-19T12:00:00-07:00')) })
+  beforeEach(() => { cloudStore.freezes = []; vi.useFakeTimers({ shouldAdvanceTime: true }); vi.setSystemTime(new Date('2026-10-19T12:00:00-07:00')) })
   afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); localStorage.clear() })
   it('defaults the scan date to tomorrow and sends the chosen date to the same scan route', async () => {
     vi.setSystemTime(new Date('2026-10-20T12:00:00-07:00'))
@@ -110,7 +117,7 @@ describe('October 20 NBA Kalshi checklist', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Track Detroit +1.5 as paper pick · 1u' }))
     fireEvent.click(screen.getByRole('button', { name: 'Scan slate' }))
     expect(await screen.findByRole('button', { name: 'Detroit +1.5 tracked · see history' })).toBeDisabled()
-    expect(JSON.parse(localStorage.getItem('edgeboard-nba-freezes-v1') || '[]')).toHaveLength(1)
+    expect(cloudStore.freezes).toHaveLength(1)
   })
   it('shows each inspected priced option in plain language with expandable reasoning and honest qualification', async () => {
     vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => ({ ok: true, json: async () => String(url).includes('nba-scan') ? pricedScan : research }) as Response)
@@ -158,7 +165,7 @@ describe('October 20 NBA Kalshi checklist', () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue({ ok: true, json: async () => research } as Response)
     render(<NbaResearch onLogout={vi.fn()} />)
     fireEvent.click(screen.getByRole('tab', { name: 'Bet history' }))
-    expect(screen.getByText(/No paper picks tracked yet/)).toBeInTheDocument()
+    expect(await screen.findByText(/No paper picks tracked yet/)).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Scan slate' })).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('tab', { name: 'Scan & choices' }))
     expect(await screen.findByRole('button', { name: 'Scan slate' })).toBeInTheDocument()
@@ -181,13 +188,25 @@ describe('October 20 NBA Kalshi checklist', () => {
     render(<NbaResearch onLogout={vi.fn()} />)
     fireEvent.click(await screen.findByRole('button', { name: 'Scan slate' }))
     fireEvent.click(await screen.findByRole('button', { name: 'Track Detroit +1.5 as paper pick · 1u' }))
-    const stored = JSON.parse(localStorage.getItem('edgeboard-nba-freezes-v1') || '[]')
+    const stored = cloudStore.freezes
     expect(stored).toHaveLength(1)
     expect(stored[0].decisions.filter((decision: { evidence: { requestedPaper: boolean } | null }) => decision.evidence?.requestedPaper)).toHaveLength(1)
-    expect(stored[0].decisions[0].selected.ticker).toBe('KXNBASPREAD-26OCT20BOSDET-BOS2')
-    expect(screen.getByRole('button', { name: 'Detroit +1.5 tracked · see history' })).toBeDisabled()
+    expect(stored[0].decisions[0].selected?.ticker).toBe('KXNBASPREAD-26OCT20BOSDET-BOS2')
+    expect(await screen.findByRole('button', { name: 'Detroit +1.5 tracked · see history' })).toBeDisabled()
     fireEvent.click(screen.getByRole('tab', { name: 'Bet history' }))
     expect(screen.getByText('Pending: 1')).toBeInTheDocument()
     expect(screen.getByText('Simulated net units: 0.000')).toBeInTheDocument()
+  })
+  it('tracks another paper pick even when legacy localStorage is already at quota', async () => {
+    vi.setSystemTime(new Date('2026-10-07T02:31:00Z'))
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => ({ ok: true,
+      json: async () => String(url).includes('nba-scan') ? pricedScan : research }) as Response)
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new DOMException('Quota exceeded', 'QuotaExceededError') })
+    render(<NbaResearch onLogout={vi.fn()} />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Scan slate' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Track Detroit +1.5 as paper pick · 1u' }))
+    expect(await screen.findByRole('button', { name: 'Detroit +1.5 tracked · see history' })).toBeDisabled()
+    expect(cloudStore.freezes).toHaveLength(1)
+    expect(localStorage.getItem('edgeboard-nba-freezes-v1')).toBeNull()
   })
 })

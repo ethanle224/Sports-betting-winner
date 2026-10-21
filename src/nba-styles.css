@@ -88,5 +88,9 @@
 .nba-market-checks { border-top: 1px solid #355162; padding-top: 12px; }
 .nba-history-stats { display: flex; flex-wrap: wrap; gap: 10px; margin: 18px 0; }
 .nba-history-stats strong { padding: 12px; border: 1px solid #355162; color: #86f7d4; background: #102334; font: 700 12px 'DM Mono', monospace; }
+.nba-audit-summary, .nba-audit-report { border: 1px solid #355162; background: #102334; padding: 14px 16px; margin: 12px 0; overflow-wrap: anywhere; }
+.nba-audit-summary h4, .nba-audit-report h5, .nba-audit-report h6 { margin: 0 0 8px; color: #86f7d4; }
+.nba-audit-summary p, .nba-audit-report p { color: #c6d5d4; line-height: 1.5; }
+.nba-audit-report a { color: #86f7d4; }
 @media (max-width: 700px) { .nba-research .risk-card { width: 100%; } .nba-source-grid { grid-template-columns: 1fr; } .nba-moves li { grid-template-columns: 1fr; gap: 5px; } .sport-tabs { padding-top: 14px; } }
 @media (max-width: 1050px) { .nba-study-grid, .nba-evidence-grid { grid-template-columns: 1fr; } }
