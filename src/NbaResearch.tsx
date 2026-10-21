@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { offseasonExamples } from './nba-offseason'
 import { nbaLineChance, type NbaForecast } from '../server/nba-model'
 import NbaFreezePanel from './NbaFreezePanel'
@@ -13,6 +13,12 @@ type Game = { id: string; home: string; away: string; homeId: string; awayId: st
 type Research = { date: string; observedAt: string; priorSeason: string; teams: Team[]; games: Game[];
   historyObservedAt?: string; sources: { standings: string; schedule: string; history?: { url: string; sha256: string }[] }; ratingsStatus: string; forecastStatus: string }
 type KalshiStudy = NbaScan & { sources: { schedule: string; markets: string; feeSchedule: string } }
+function defaultScanDate() {
+  const tomorrow = new Date()
+  tomorrow.setDate(tomorrow.getDate() + 1)
+  const local = `${tomorrow.getFullYear()}-${String(tomorrow.getMonth() + 1).padStart(2, '0')}-${String(tomorrow.getDate()).padStart(2, '0')}`
+  return local < '2026-10-20' ? '2026-10-20' : local > '2027-04-11' ? '2027-04-11' : local
+}
 
 const factorLabels: { key: keyof NonNullable<NbaScanGame['factors']>; label: string }[] = [
   { key: 'injuries', label: 'Injury' }, { key: 'starters', label: 'Confirmed starters' },
@@ -56,7 +62,7 @@ function PricedOption({ side, game, leading = false }: { side: NbaStudySide; gam
 }
 
 export default function NbaResearch({ onLogout }: { onLogout: () => Promise<void> }) {
-  const [date, setDate] = useState('2026-10-20')
+  const [date, setDate] = useState(defaultScanDate)
   const [data, setData] = useState<Research | null>(null)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
@@ -66,6 +72,7 @@ export default function NbaResearch({ onLogout }: { onLogout: () => Promise<void
   const [total, setTotal] = useState('224.5')
   const [study, setStudy] = useState<KalshiStudy | null>(null)
   const [scanBusy, setScanBusy] = useState(false)
+  const scanSequence = useRef(0)
   const [scanError, setScanError] = useState('')
   const [nbaView, setNbaView] = useState<'scan' | 'history'>('scan')
   const [tracked, setTracked] = useState<string[]>(() => {
@@ -81,19 +88,27 @@ export default function NbaResearch({ onLogout }: { onLogout: () => Promise<void
       setTracked((old) => [...old, gameId]); setLedgerRevision((old) => old + 1); setTrackError('')
     } catch (failure) { setTrackError(failure instanceof Error ? failure.message : 'Paper pick not saved') }
   }
-  async function scanOpeningSlate() {
+  function changeDate(next: string) {
+    scanSequence.current++
+    setDate(next); setStudy(null); setScanError('')
+  }
+  async function scanSlate() {
+    const requestId = ++scanSequence.current
     setStudy(null); setTrackError(''); setScanError(''); setScanBusy(true)
     try {
-      const response = await fetch('/api/nba-scan?date=2026-10-20&quantity=10', { credentials: 'same-origin' })
+      const response = await fetch(`/api/nba-scan?date=${encodeURIComponent(date)}&quantity=10`, { credentials: 'same-origin' })
       if (!response.ok) throw new Error('Kalshi scan unavailable. No partial study sides shown.')
       const payload: KalshiStudy = await response.json()
-      if (payload.date !== '2026-10-20' || payload.status !== 'STUDY_ONLY_NO_QUALIFIED_PICKS' ||
-        !Array.isArray(payload.games) || payload.games.length !== 3 || !Array.isArray(payload.marketInventory) ||
+      if (payload.date !== date || payload.status !== 'STUDY_ONLY_NO_QUALIFIED_PICKS' ||
+        !Array.isArray(payload.games) || payload.games.length > 15 ||
+        new Set(payload.games.map((item) => item.gameId)).size !== payload.games.length || !Array.isArray(payload.marketInventory) ||
         !Array.isArray(payload.series) || !payload.historyObservedAt || payload.games.some((item) => item.qualifiedPaperPick !== false || !Array.isArray(item.inspected))) {
         throw new Error('Kalshi scan incomplete. No partial study sides shown.')
       }
-      setStudy(payload)
-    } catch (failure) { setScanError(failure instanceof Error ? failure.message : 'Kalshi scan unavailable') }
+      if (requestId === scanSequence.current) setStudy(payload)
+    } catch (failure) {
+      if (requestId === scanSequence.current) setScanError(failure instanceof Error ? failure.message : 'Kalshi scan unavailable')
+    }
     finally { setScanBusy(false) }
   }
   useEffect(() => {
@@ -124,12 +139,14 @@ export default function NbaResearch({ onLogout }: { onLogout: () => Promise<void
   return <main className="shell nba-research" id="nba-research">
     <nav className="nba-view-tabs" role="tablist" aria-label="NBA paper workspace"><button type="button" role="tab" aria-selected={nbaView === 'scan'} onClick={() => setNbaView('scan')}>Scan &amp; choices</button><button type="button" role="tab" aria-selected={nbaView === 'history'} onClick={() => setNbaView('history')}>Bet history</button></nav>
     <header className="topbar"><a className="brand" href="#nba-research" aria-label="Edgeboard NBA home"><span className="brand-mark">E</span><span>EDGEBOARD</span></a><div className="topbar-actions"><span className="status">NBA PAPER RESEARCH · NO REAL ORDERS</span><button className="logout" type="button" onClick={() => void onLogout()}>Log out</button></div></header>
-    <section className="board nba-paper-workspace" aria-label="October 20 Kalshi study checklist"><p className="eyebrow">01 / NBA PAPER DESK</p><h2>Scan opening-night choices &amp; track results</h2>
+    <section className="board nba-paper-workspace" aria-label="NBA slate study checklist"><p className="eyebrow">01 / NBA PAPER DESK</p><h2>Scan slate &amp; track results</h2>
       {nbaView === 'scan' && <>
       <p className="help">Scan, pick a side, tap Track. Each click saves one pending 1u paper study in this browser. Not a qualified edge or real order.</p>
-      {date === '2026-10-20' ? <button type="button" disabled={scanBusy} onClick={() => void scanOpeningSlate()}>{scanBusy ? 'Scanning Kalshi…' : 'Scan Kalshi opening slate'}</button> : <p className="help">Exact Kalshi mapping is available for October 20 only; choose that date below to scan.</p>}
+      <div className="scan-controls"><label>Scan game date<input type="date" min="2026-10-20" max="2027-04-11" value={date} onChange={(event) => changeDate(event.target.value)} /></label>
+        <button type="button" disabled={scanBusy || !date} onClick={() => void scanSlate()}>{scanBusy ? 'Scanning Kalshi…' : 'Scan slate'}</button></div>
       {scanError && <p role="alert">{scanError}</p>}{trackError && <p role="alert">{trackError}</p>}
-      {study && date === '2026-10-20' && <><p className="help">Observed {new Date(study.observedAt).toLocaleString()} · 10 whole contracts per inspected side · quotes may change before tip. <a href={study.sources.markets} target="_blank" rel="noreferrer">Kalshi public markets</a> · <a href={study.sources.feeSchedule} target="_blank" rel="noreferrer">fee schedule</a></p>
+      {study && study.date === date && <><p className="help">{study.date} slate · observed {new Date(study.observedAt).toLocaleString()} · 10 whole contracts per inspected side · quotes may change before tip. <a href={study.sources.markets} target="_blank" rel="noreferrer">Kalshi public markets</a> · <a href={study.sources.feeSchedule} target="_blank" rel="noreferrer">fee schedule</a></p>
+        {!study.games.length && <p className="help">No regular-season NBA games on this date. No paper choices.</p>}
         <div className="nba-study-grid">{study.games.map((item) => <article key={item.gameId} className="nba-study-card"><h3>{item.away} @ {item.home}</h3>
           {item.studySide ? <><p><strong>Study side · not a qualified bet</strong></p><PricedOption side={item.studySide} game={item} leading />
             <button className="nba-add-paper" type="button" disabled={tracked.includes(item.gameId)} onClick={() => trackPick(item.gameId)}>
@@ -150,7 +167,7 @@ export default function NbaResearch({ onLogout }: { onLogout: () => Promise<void
     <section className="hero"><div><p className="eyebrow">NBA / 2026–27 · PAPER RESEARCH ONLY</p><h1>A baseline.<br /><em>Not a promise.</em></h1><p className="lede">Our priority is net units after costs, not a promised win percentage. Scores-only probabilities are experimental; they are not a betting edge. NFL forecasts, rules and paper records stay in their own tab.</p></div><aside className="risk-card"><span>DECISION STATUS</span><strong>Paper studies, not qualified picks</strong><div>The choices above are live-scan research leads. Current lineups, exact costs and prospective profitability remain unverified.</div></aside></section>
     <section className="board" aria-labelledby="matchups-heading"><p className="eyebrow">02 / MATCHUP DESK</p><h2 id="matchups-heading">Upcoming regular-season slate</h2>
       <p className="help">Choose a regular-season game date. ESPN schedule and 2025–26 regular-season standings are fetched together; incomplete data fails closed. These are past team averages, not a 2026–27 lineup-adjusted forecast.</p>
-      <div className="scan-controls"><label>NBA game date<input type="date" min="2026-10-20" max="2027-04-11" value={date} onChange={(event) => { setDate(event.target.value); setStudy(null); setScanError('') }} /></label><span>{busy ? 'Loading sourced NBA data…' : data ? `Observed ${new Date(data.observedAt).toLocaleString()}` : 'No current comparison'}</span></div>
+      <div className="scan-controls"><label>NBA game date<input type="date" min="2026-10-20" max="2027-04-11" value={date} onChange={(event) => changeDate(event.target.value)} /></label><span>{busy ? 'Loading sourced NBA data…' : data ? `Observed ${new Date(data.observedAt).toLocaleString()}` : 'No current comparison'}</span></div>
       {error && <p role="alert">{error}</p>}
       {data && <>
         {data.games.length ? <div className="nba-game-list" role="group" aria-label="NBA matchups">{data.games.map((item) => <button key={item.id} type="button" aria-pressed={selected === item.id} onClick={() => setSelected(item.id)}>{item.away} @ {item.home}<small>{new Date(item.startsAt).toLocaleString()}</small></button>)}</div> : <p className="help">No regular-season games listed for this date. No picks implied.</p>}
@@ -165,7 +182,7 @@ export default function NbaResearch({ onLogout }: { onLogout: () => Promise<void
         <h4>2025–26 venue splits · context only</h4><p>{home.abbreviation} 2025–26 home: {game?.venueContext?.home ? `${game.venueContext.home.wins}–${game.venueContext.home.losses} · ${game.venueContext.home.margin.toFixed(1)} avg margin` : 'unavailable'}<br />{away.abbreviation} 2025–26 road: {game?.venueContext?.awayRoad ? `${game.venueContext.awayRoad.wins}–${game.venueContext.awayRoad.losses} · ${game.venueContext.awayRoad.margin.toFixed(1)} avg margin` : 'unavailable'}</p>
         <h4>Recent head-to-head · context only</h4>{game?.meetings?.length ? <ul>{game.meetings.map((meeting) => <li key={meeting.id}><a href={`https://www.espn.com/nba/game/_/gameId/${encodeURIComponent(meeting.id)}`} target="_blank" rel="noreferrer">{meeting.tip.slice(0, 10)}</a> · {meeting.homeId === home.id ? home.abbreviation : away.abbreviation} home {meeting.homeScore}–{meeting.awayScore} {meeting.neutral ? '(neutral)' : ''}</li>)}</ul> : <p className="help">No recent meetings in the two-season history. Do not assume an unchanged rivalry edge.</p>}
         <p className="help">Head-to-head and team venue splits have <strong>zero extra numerical weight</strong> until a recency- and roster-adjusted feature improves forward tests. Home court is a league baseline, not a team-specific home-record bonus.</p></div>}
-        <p className="help">Source: <a href={data.sources.standings} target="_blank" rel="noreferrer">ESPN 2025–26 standings</a> · <a href={data.sources.schedule} target="_blank" rel="noreferrer">ESPN game schedule</a>. Availability and ratings are not included; use the paper desk above for opening-slate market depth.</p>
+        <p className="help">Source: <a href={data.sources.standings} target="_blank" rel="noreferrer">ESPN 2025–26 standings</a> · <a href={data.sources.schedule} target="_blank" rel="noreferrer">ESPN game schedule</a>. Availability and ratings are not included; use the paper desk above for selected-date market depth.</p>
       </>}
     </section>
     <section className="board" aria-labelledby="teams-heading"><p className="eyebrow">03 / LEAGUE BASELINE</p><h2 id="teams-heading">All teams · prior season</h2><p className="help">Every team’s 2025–26 W–L, scoring and points allowed. A roster overhaul can make these especially stale. No 2026–27 performance is implied.</p>

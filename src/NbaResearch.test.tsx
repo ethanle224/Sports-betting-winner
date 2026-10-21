@@ -1,5 +1,5 @@
-import { fireEvent, render, screen, within } from '@testing-library/react'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import NbaResearch from './NbaResearch'
 
 const research = { date: '2026-10-20', observedAt: '2026-10-06T04:00:00Z', priorSeason: '2025-26', teams: [], games: [],
@@ -45,13 +45,43 @@ const pricedScan = { ...scan, games: scan.games.map((item, index) => {
 }) }
 
 describe('October 20 NBA Kalshi checklist', () => {
+  beforeEach(() => { vi.useFakeTimers({ shouldAdvanceTime: true }); vi.setSystemTime(new Date('2026-10-19T12:00:00-07:00')) })
   afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); localStorage.clear() })
+  it('defaults the scan date to tomorrow and sends the chosen date to the same scan route', async () => {
+    vi.setSystemTime(new Date('2026-10-20T12:00:00-07:00'))
+    const next = { ...scan, date: '2026-10-21', games: [{ ...scan.games[0], gameId: '401909834', startsAt: '2026-10-21T23:00:00Z', away: 'Atlanta', home: 'Orlando', studySide: null }] }
+    const fetcher = vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => ({ ok: true, json: async () =>
+      String(url).includes('nba-scan') ? next : research }) as Response)
+    render(<NbaResearch onLogout={vi.fn()} />)
+    const picker = screen.getByLabelText('Scan game date') as HTMLInputElement
+    expect(picker.value).toBe('2026-10-21')
+    fireEvent.click(screen.getByRole('button', { name: 'Scan slate' }))
+    expect(await screen.findByRole('heading', { name: 'Atlanta @ Orlando' })).toBeInTheDocument()
+    expect(fetcher).toHaveBeenCalledWith('/api/nba-scan?date=2026-10-21&quantity=10', expect.objectContaining({ credentials: 'same-origin' }))
+    fireEvent.change(picker, { target: { value: '2026-10-22' } })
+    expect(screen.queryByRole('heading', { name: 'Atlanta @ Orlando' })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Scan slate' }))
+    expect(fetcher).toHaveBeenCalledWith('/api/nba-scan?date=2026-10-22&quantity=10', expect.objectContaining({ credentials: 'same-origin' }))
+  })
+  it('discards an in-flight scan when its date is changed and changed back', async () => {
+    let resolveScan!: (response: Response) => void
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => String(url).includes('nba-scan') ?
+      new Promise<Response>((resolve) => { resolveScan = resolve }) : { ok: true, json: async () => research } as Response)
+    render(<NbaResearch onLogout={vi.fn()} />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Scan slate' }))
+    const picker = screen.getByLabelText('Scan game date')
+    fireEvent.change(picker, { target: { value: '2026-10-21' } })
+    fireEvent.change(picker, { target: { value: '2026-10-20' } })
+    await act(async () => resolveScan({ ok: true, json: async () => scan } as Response))
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Scan slate' })).toBeEnabled())
+    expect(screen.queryByRole('heading', { name: 'Boston @ Detroit' })).not.toBeInTheDocument()
+  })
   it('shows an opt-in read-only scan with three study sides, missing spread/total markets and pending gates', async () => {
     const fetcher = vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => ({ ok: true, json: async () => String(url).includes('nba-scan') ? scan : research }) as Response)
     render(<NbaResearch onLogout={vi.fn()} />)
-    const button = await screen.findByRole('button', { name: 'Scan Kalshi opening slate' })
+    const button = await screen.findByRole('button', { name: 'Scan slate' })
     fireEvent.click(button)
-    const panel = await screen.findByRole('region', { name: 'October 20 Kalshi study checklist' })
+    const panel = await screen.findByRole('region', { name: 'NBA slate study checklist' })
     expect(within(panel).getAllByText(/Study side · not a qualified bet/)).toHaveLength(3)
     expect(within(panel).getAllByText(/Spread: 0.*Total: 0/)).toHaveLength(3)
     expect(within(panel).getAllByText(/Evidence: 0 of 13 checks/)).toHaveLength(3)
@@ -65,7 +95,7 @@ describe('October 20 NBA Kalshi checklist', () => {
     vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => String(url).includes('nba-scan') ? { ok: false, status: 502 } as Response :
       { ok: true, json: async () => research } as Response)
     render(<NbaResearch onLogout={vi.fn()} />)
-    fireEvent.click(await screen.findByRole('button', { name: 'Scan Kalshi opening slate' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Scan slate' }))
     expect(await screen.findByRole('alert')).toHaveTextContent(/Kalshi scan unavailable/)
     expect(screen.queryByText(/Study side · not a qualified bet/)).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /Track .* as paper pick/ })).not.toBeInTheDocument()
@@ -76,17 +106,17 @@ describe('October 20 NBA Kalshi checklist', () => {
     vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => ({ ok: true,
       json: async () => String(url).includes('nba-scan') ? { ...pricedScan, observedAt: scans++ ? '2026-10-07T02:30:30Z' : pricedScan.observedAt } : research }) as Response)
     render(<NbaResearch onLogout={vi.fn()} />)
-    fireEvent.click(await screen.findByRole('button', { name: 'Scan Kalshi opening slate' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Scan slate' }))
     fireEvent.click(await screen.findByRole('button', { name: 'Track Detroit +1.5 as paper pick · 1u' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Scan Kalshi opening slate' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Scan slate' }))
     expect(await screen.findByRole('button', { name: 'Detroit +1.5 tracked · see history' })).toBeDisabled()
     expect(JSON.parse(localStorage.getItem('edgeboard-nba-freezes-v1') || '[]')).toHaveLength(1)
   })
   it('shows each inspected priced option in plain language with expandable reasoning and honest qualification', async () => {
     vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => ({ ok: true, json: async () => String(url).includes('nba-scan') ? pricedScan : research }) as Response)
     render(<NbaResearch onLogout={vi.fn()} />)
-    fireEvent.click(await screen.findByRole('button', { name: 'Scan Kalshi opening slate' }))
-    const panel = await screen.findByRole('region', { name: 'October 20 Kalshi study checklist' })
+    fireEvent.click(await screen.findByRole('button', { name: 'Scan slate' }))
+    const panel = await screen.findByRole('region', { name: 'NBA slate study checklist' })
     expect(within(panel).getByText('Detroit +1.5')).toBeInTheDocument()
     expect(within(panel).getByText('Under 228.5')).toBeInTheDocument()
     expect(within(panel).getByText('San Antonio -4.5')).toBeInTheDocument()
@@ -101,8 +131,8 @@ describe('October 20 NBA Kalshi checklist', () => {
   it('shows sourced per-game reported, verified, estimated and unknown factors without calling the study qualified', async () => {
     vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => ({ ok: true, json: async () => String(url).includes('nba-scan') ? pricedScan : research }) as Response)
     render(<NbaResearch onLogout={vi.fn()} />)
-    fireEvent.click(await screen.findByRole('button', { name: 'Scan Kalshi opening slate' }))
-    const panel = await screen.findByRole('region', { name: 'October 20 Kalshi study checklist' })
+    fireEvent.click(await screen.findByRole('button', { name: 'Scan slate' }))
+    const panel = await screen.findByRole('region', { name: 'NBA slate study checklist' })
     const firstCard = within(panel).getByText('Detroit +1.5').closest('article')!
     fireEvent.click(within(firstCard).getByText('Evidence & gaps'))
     expect(within(firstCard).getByText(/Player A — Out/)).toBeInTheDocument()
@@ -118,7 +148,7 @@ describe('October 20 NBA Kalshi checklist', () => {
     vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => ({ ok: true,
       json: async () => String(url).includes('nba-scan') ? unpriced : research }) as Response)
     render(<NbaResearch onLogout={vi.fn()} />)
-    fireEvent.click(await screen.findByRole('button', { name: 'Scan Kalshi opening slate' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Scan slate' }))
     const first = (await screen.findByRole('heading', { name: 'Boston @ Detroit' })).closest('article')!
     expect(within(first).getByText('Evidence & gaps')).toBeInTheDocument()
     expect(within(first).getByText(/No sized book\/model comparison available/)).toBeInTheDocument()
@@ -129,14 +159,14 @@ describe('October 20 NBA Kalshi checklist', () => {
     render(<NbaResearch onLogout={vi.fn()} />)
     fireEvent.click(screen.getByRole('tab', { name: 'Bet history' }))
     expect(screen.getByText(/No paper picks tracked yet/)).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Scan Kalshi opening slate' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Scan slate' })).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('tab', { name: 'Scan & choices' }))
-    expect(await screen.findByRole('button', { name: 'Scan Kalshi opening slate' })).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: 'Scan slate' })).toBeInTheDocument()
   })
   it('puts scan and history controls before the long research desk instead of burying them', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue({ ok: true, json: async () => research } as Response)
     render(<NbaResearch onLogout={vi.fn()} />)
-    const scanButton = screen.getByRole('button', { name: 'Scan Kalshi opening slate' })
+    const scanButton = screen.getByRole('button', { name: 'Scan slate' })
     const historyTab = screen.getByRole('tab', { name: 'Bet history' })
     const desk = screen.getByRole('heading', { name: 'Upcoming regular-season slate' })
     const brand = screen.getByRole('link', { name: 'Edgeboard NBA home' })
@@ -149,7 +179,7 @@ describe('October 20 NBA Kalshi checklist', () => {
     vi.useFakeTimers({ shouldAdvanceTime: true }); vi.setSystemTime(new Date('2026-10-07T02:31:00Z'))
     vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => ({ ok: true, json: async () => String(url).includes('nba-scan') ? pricedScan : research }) as Response)
     render(<NbaResearch onLogout={vi.fn()} />)
-    fireEvent.click(await screen.findByRole('button', { name: 'Scan Kalshi opening slate' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Scan slate' }))
     fireEvent.click(await screen.findByRole('button', { name: 'Track Detroit +1.5 as paper pick · 1u' }))
     const stored = JSON.parse(localStorage.getItem('edgeboard-nba-freezes-v1') || '[]')
     expect(stored).toHaveLength(1)

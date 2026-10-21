@@ -8,7 +8,33 @@ export const OPENING_NBA_GAMES = [
   { gameId: '401909089', date: '2026-10-20', awayId: '20', homeId: '18', awayCode: 'PHI', homeCode: 'NYK', awayCity: 'Philadelphia', homeCity: 'New York', eventCode: 'PHINYK' },
   { gameId: '401909090', date: '2026-10-20', awayId: '25', homeId: '24', awayCode: 'OKC', homeCode: 'SAS', awayCity: 'Oklahoma City', homeCity: 'San Antonio', eventCode: 'OKCSAS' },
 ] as const
-export type OpeningNbaGame = typeof OPENING_NBA_GAMES[number]
+export type OpeningNbaGame = { gameId: string; date: string; awayId: string; homeId: string; awayCode: string; homeCode: string;
+  awayCity: string; homeCity: string; eventCode: string }
+type ScheduledEvent = { id?: string; date?: string; season?: { type?: number }; competitions?: { neutralSite?: boolean;
+  competitors?: { homeAway?: string; team?: { id?: string; location?: string; name?: string; abbreviation?: string } }[] }[] }
+const codes: Record<string, string> = { WSH: 'WAS', UTAH: 'UTA', NO: 'NOP', GS: 'GSW', NY: 'NYK', SA: 'SAS', PHO: 'PHX', BKN: 'BKN', LAL: 'LAL', LAC: 'LAC' }
+function identity(team: { id?: string; location?: string; name?: string; abbreviation?: string } | undefined) {
+  if (!team?.id || !team.location || !team.abbreviation || !team.name || !/^[A-Z]{2,4}$/.test(team.abbreviation)) throw new Error('Incomplete NBA team identity')
+  const city = team.abbreviation === 'LAL' ? 'Los Angeles L' : team.abbreviation === 'LAC' ? 'Los Angeles C' : team.location === 'LA' ? 'Los Angeles C' : team.location
+  if (!/^[A-Za-z .]+$/.test(city)) throw new Error('Unrecognized NBA team location')
+  return { id: team.id, city, code: codes[team.abbreviation] ?? team.abbreviation }
+}
+export function mapNbaSchedule(date: string, events: ScheduledEvent[]): OpeningNbaGame[] {
+  const ids = new Set<string>(); const pairs = new Set<string>()
+  return events.filter((event) => event.season?.type === 2).map((event) => {
+    const competitors = event.competitions?.[0]?.competitors ?? []
+    if (!event.id || ids.has(event.id) || competitors.length !== 2 || !event.date || !Number.isFinite(Date.parse(event.date)) ||
+      new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(event.date)) !== date ||
+      typeof event.competitions?.[0]?.neutralSite !== 'boolean') throw new Error('Selected NBA schedule mapping incomplete')
+    const away = identity(competitors.find((c) => c.homeAway === 'away')?.team)
+    const home = identity(competitors.find((c) => c.homeAway === 'home')?.team)
+    const eventCode = `${away.code}${home.code}`
+    if (away.id === home.id || pairs.has(eventCode)) throw new Error('Ambiguous NBA matchup')
+    ids.add(event.id); pairs.add(eventCode)
+    return { gameId: event.id, date, awayId: away.id, homeId: home.id, awayCode: away.code, homeCode: home.code,
+      awayCity: away.city, homeCity: home.city, eventCode }
+  })
+}
 export type NbaMarket = { ticker: string; event_ticker: string; title: string; rules_primary: string; rules_secondary: string;
   gameId: string; series: NbaSeries; kind: 'moneyline' | 'spread' | 'total'; team?: 'home' | 'away'; line?: number;
   raw?: Record<string, unknown> }
@@ -16,10 +42,13 @@ export type NbaBook = { orderbook_fp?: { yes_dollars?: unknown; no_dollars?: unk
 const numeric = (v: unknown, max: number) => typeof v === 'string' && v.trim() !== '' && Number.isFinite(Number(v)) && Number(v) >= 0 && Number(v) <= max ? Number(v) : null
 
 function classify(raw: Record<string, unknown>, series: NbaSeries, game: OpeningNbaGame): NbaMarket | null {
-  const event = `${series}-26OCT20${game.eventCode}`
+  const [year, month, day] = game.date.split('-').map(Number)
+  const event = `${series}-${String(year).slice(2)}${new Date(Date.UTC(year, month - 1, day)).toLocaleString('en-US', { month: 'short', timeZone: 'UTC' }).toUpperCase()}${String(day).padStart(2, '0')}${game.eventCode}`
   if (raw.event_ticker !== event || typeof raw.ticker !== 'string' || !raw.ticker.startsWith(`${event}-`) ||
       typeof raw.rules_primary !== 'string' || typeof raw.rules_secondary !== 'string' || typeof raw.title !== 'string') return null
   const rules = raw.rules_primary
+  const dateLabel = new Date(Date.UTC(year, month - 1, day)).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' })
+  if (!rules.includes(`the ${game.awayCity} vs ${game.homeCity} Pro Basketball game originally scheduled for ${dateLabel},`)) return null
   const base = { ticker: raw.ticker, event_ticker: event, title: raw.title, rules_primary: rules,
     rules_secondary: raw.rules_secondary, gameId: game.gameId, series, raw }
   if (series === 'KXNBAGAME') {
@@ -40,8 +69,8 @@ function classify(raw: Record<string, unknown>, series: NbaSeries, game: Opening
   return null
 }
 
-export async function collectOpeningNbaMarkets(date: string, fetcher: typeof fetch = fetch) {
-  if (date !== '2026-10-20') throw new Error('Only opening slate is mapped')
+export async function collectOpeningNbaMarkets(date: string, games: OpeningNbaGame[], fetcher: typeof fetch = fetch) {
+  if (games.some((game) => game.date !== date)) throw new Error('Selected date and mapped games disagree')
   const markets: NbaMarket[] = []
   const series = [] as { series: NbaSeries; listed: number; matched: number }[]
   for (const ticker of SERIES) {
@@ -56,7 +85,7 @@ export async function collectOpeningNbaMarkets(date: string, fetcher: typeof fet
       for (const raw of (data as { markets: unknown[] }).markets) {
         listed++
         if (!raw || typeof raw !== 'object') continue
-        for (const game of OPENING_NBA_GAMES) {
+        for (const game of games) {
           const item = classify(raw as Record<string, unknown>, ticker, game)
           if (item) { markets.push(item); matched++; break }
         }

@@ -19,6 +19,19 @@ const attestation: NbaEvidence = { requestedPaper: true, availabilitySource: 'ht
   uncertaintyAccepted: true, rationale: 'Price is favorable only if the baseline remains calibrated.' }
 
 describe('NBA paper-only opening-slate freeze', () => {
+  it('tracks a selected-date single-game slate without requiring the October 20 trio', () => {
+    const next = 'KXNBAGAME-26OCT21ATLORL-ORL'
+    const one: NbaScan = { ...scan, date: '2026-10-21', observedAt: '2026-10-20T20:00:00Z', marketObservedAt: '2026-10-20T19:59:00Z',
+      marketInventory: [{ ticker: next }], games: [{ ...scan.games[0], gameId: '401909834', away: 'Atlanta', home: 'Orlando',
+        startsAt: '2026-10-21T23:00:00Z', studySide: { ...side, ticker: next },
+        inspected: [{ ticker: next, observedAt: '2026-10-20T19:59:30Z', source: `https://external-api.kalshi.com/trade-api/v2/markets/${next}/orderbook`, book: {} }] }] }
+    const memory = new Map<string, string>()
+    const storage = { getItem: (key: string) => memory.get(key) ?? null, setItem: (key: string, value: string) => { memory.set(key, value) } }
+    const record = trackNbaPick(storage, one, '401909834', '2026-10-20T20:01:00Z')
+    expect(record.scan.games).toHaveLength(1)
+    expect(readNbaFreezes(storage)).toEqual([record])
+    expect(() => trackNbaPick(storage, one, '401909834', '2026-10-20T20:01:00Z')).toThrow(/already tracking/i)
+  })
   it('tracks a single clicked game immediately as an unqualified one-unit pending study, once per game', () => {
     const memory = new Map<string, string>()
     const storage = { getItem: (key: string) => memory.get(key) ?? null, setItem: (key: string, value: string) => { memory.set(key, value) } }
@@ -50,7 +63,7 @@ describe('NBA paper-only opening-slate freeze', () => {
   it('rejects stale quotes, post-tip freezes, incomplete snapshots and stale injury evidence', () => {
     expect(() => freezeNbaStudy(scan, {}, '2026-10-19T20:30:01Z')).toThrow(/stale/i)
     expect(() => freezeNbaStudy(scan, {}, '2026-10-20T19:00:00Z')).toThrow(/tip|stale/i)
-    expect(() => freezeNbaStudy({ ...scan, games: scan.games.slice(0, 2) }, {}, now)).toThrow(/three/i)
+    expect(() => freezeNbaStudy({ ...scan, games: [] }, {}, now)).toThrow(/selected-date/i)
     const stale = { ...attestation, availabilityObservedAt: '2026-10-17T20:00:00Z' }
     expect(freezeNbaStudy(scan, { '401909088': stale }, now).decisions[0].status).toBe('STUDY')
   })

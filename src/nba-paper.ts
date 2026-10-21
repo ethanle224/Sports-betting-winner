@@ -38,18 +38,20 @@ export function nbaSideLabel(side: NbaStudySide, game: NbaScanGame): string {
   return `${side.side.toUpperCase()} · ${side.ticker}`
 }
 type Storage = Pick<globalThis.Storage, 'getItem' | 'setItem'>
-const IDS = ['401909088', '401909089', '401909090']
+
 const validUrl = (text: string) => {
   try { return new URL(text).protocol === 'https:' } catch { return false }
 }
 
 export function freezeNbaStudy(input: NbaScan, evidence: Record<string, NbaEvidence>, nowIso: string): NbaFreeze {
   const now = Date.parse(nowIso); const observed = Date.parse(input.observedAt)
-  if (input.date !== '2026-10-20' || input.status !== 'STUDY_ONLY_NO_QUALIFIED_PICKS' ||
-    input.quantity !== 10 || !Array.isArray(input.games) || input.games.length !== 3 ||
-    IDS.some((id) => input.games.filter((g) => g.gameId === id).length !== 1) ||
+  if (!/^20\d\d-\d\d-\d\d$/.test(input.date) || input.date < '2026-10-20' || input.date > '2027-04-11' ||
+    input.status !== 'STUDY_ONLY_NO_QUALIFIED_PICKS' || input.quantity !== 10 ||
+    !Array.isArray(input.games) || input.games.length < 1 || input.games.length > 15 ||
+    new Set(input.games.map((g) => g.gameId)).size !== input.games.length || input.games.some((g) => !g.gameId ||
+      !Number.isFinite(Date.parse(g.startsAt)) || new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(g.startsAt)) !== input.date) ||
     !Array.isArray(input.marketInventory) || !Array.isArray(input.series) || !input.sources?.markets || !input.historyObservedAt) {
-    throw new Error('Incomplete three-game NBA scan')
+    throw new Error('Incomplete selected-date NBA scan')
   }
   if (!Number.isFinite(now) || !Number.isFinite(observed) || observed > now || now - observed > 30 * 60_000) {
     throw new Error('NBA scan is stale or from the future')
@@ -98,7 +100,8 @@ export function readNbaFreezes(storage: Storage): NbaFreeze[] {
   if (!text) return []
   try {
     const value: unknown = JSON.parse(text)
-    if (!Array.isArray(value) || value.some((v) => !v || typeof v.id !== 'string' || !Array.isArray(v.decisions) || v.decisions.length !== 3)) throw new Error('Malformed ledger')
+    if (!Array.isArray(value) || value.some((v) => !v || typeof v.id !== 'string' || !Array.isArray(v.decisions) ||
+      v.decisions.length < 1 || v.decisions.length > 15 || v.decisions.length !== v.scan?.games?.length)) throw new Error('Malformed ledger')
     return value as NbaFreeze[]
   } catch { throw new Error('NBA local ledger is corrupt; export/recover it before writing') }
 }
@@ -116,7 +119,7 @@ export function trackNbaPick(storage: Storage, scan: NbaScan, gameId: string, no
   if (!game?.studySide) throw new Error('No priced paper pick for this game')
   const evidence: NbaEvidence = { requestedPaper: true, availabilitySource: '', availabilityObservedAt: '',
     availabilityNotes: '', rulesSource: '', feeSource: '', uncertaintyAccepted: false, rationale: '' }
-  // Validate scan freshness, all three mapped games and the pre-tip boundary even
+  // Validate scan freshness, all selected-date games and the pre-tip boundary even
   // for the one-click path. Other games are retained for audit but not requested.
   const snapshot = freezeNbaStudy(scan, { [gameId]: evidence }, nowIso)
   const chosen = snapshot.decisions.find((decision) => decision.gameId === gameId)

@@ -35,7 +35,7 @@ describe('Edgeboard dashboard', () => {
       allInCost: 0.5, modelProbability: 0.6 }, results: [] }]))
     render(<App />)
     expect(await screen.findByRole('tab', { name: 'NBA' })).toHaveAttribute('aria-selected', 'true')
-    expect(screen.getByRole('button', { name: 'Scan Kalshi opening slate' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Scan slate' })).toBeInTheDocument()
     expect(screen.queryByText('Legacy NFL')).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('tab', { name: 'NFL' }))
     expect(screen.getByText('Legacy NFL')).toBeInTheDocument()
