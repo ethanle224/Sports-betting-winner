@@ -4,7 +4,10 @@ import type { NbaGame } from './nba-model.js'
 export type NbaFactor = { status: 'verified' | 'reported' | 'estimated' | 'unknown'; detail: string;
   source?: string; observedAt?: string; players?: { team: string; name: string; status: string; reportedAt: string }[] }
 export type NbaFactors = { injuries: NbaFactor; starters: NbaFactor; offenseDefense: NbaFactor;
-  pace: NbaFactor; threes: NbaFactor; ballMovement: NbaFactor; rosterMatchup: NbaFactor }
+  pace: NbaFactor; threes: NbaFactor; shotZones?: NbaFactor; ballMovement: NbaFactor; rosterMatchup: NbaFactor;
+  pregameLine: NbaPregameLine | null }
+export type NbaPregameLine = { homeSpread: number; awaySpread: number; total: number | null; rawDetails: string;
+  provider: string; source: string; observedAt: string }
 
 const root = 'https://site.api.espn.com/apis/site/v2/sports/basketball/nba'
 const unknown = (detail: string): NbaFactor => ({ status: 'unknown', detail })
@@ -41,6 +44,22 @@ export async function collectNbaFactors(game: OpeningNbaGame, history: NbaGame[]
     } catch { return null }
   }
   const [summary, homeRaw, awayRaw] = await Promise.all([fetchJson(summaryUrl), fetchJson(homeUrl), fetchJson(awayUrl)])
+  const odds = summary && typeof summary === 'object' ? (summary as { pickcenter?: unknown }).pickcenter : null
+  let pregameLine: NbaPregameLine | null = null
+  if (Array.isArray(odds)) for (const item of odds) {
+    const match = /^([A-Z]{2,4}) -([0-9]+(?:\.[0-9]+)?)$/.exec(item?.details ?? '')
+    const spread = match ? Number(match[2]) : NaN
+    if (!match || !Number.isFinite(spread) || spread <= 0 || spread > 40 ||
+      (typeof item?.spread !== 'number' || !Number.isFinite(item.spread) || Math.abs(item.spread) !== spread) ||
+      typeof item?.provider?.name !== 'string' || !item.provider.name.trim() ||
+      (match[1] !== game.homeCode && match[1] !== game.awayCode)) continue
+    const homeSpread = match[1] === game.homeCode ? -spread : spread
+    const total = typeof item.overUnder === 'number' && Number.isFinite(item.overUnder) &&
+      item.overUnder >= 150 && item.overUnder <= 350 && Math.abs(item.overUnder % 1) === 0.5 ? item.overUnder : null
+    pregameLine = { homeSpread, awaySpread: -homeSpread, total, rawDetails: item.details, provider: item.provider.name,
+      source: summaryUrl, observedAt }
+    break
+  }
   const injuryGroups = summary && typeof summary === 'object' ? (summary as { injuries?: unknown }).injuries : null
   const now = Date.parse(observedAt)
   const players: NonNullable<NbaFactor['players']> = []
@@ -61,7 +80,7 @@ export async function collectNbaFactors(game: OpeningNbaGame, history: NbaGame[]
   const home = parseStats(homeRaw, game.homeId, history)
   const away = parseStats(awayRaw, game.awayId, history)
   const evidence = { source: `${homeUrl} · ${awayUrl}`, observedAt }
-  return { injuries,
+  return { injuries, pregameLine,
     starters: unknown('Confirmed starting five not available before lineup announcement.'),
     rosterMatchup: unknown('No validated current-roster adjustment or player on/off model; prior-season rates are context only.'),
     offenseDefense: home && away ? { status: 'verified', detail: `2025–26 points for/allowed: ${game.awayCode} ${away.points.toFixed(1)}/${away.allowed.toFixed(1)}, ${game.homeCode} ${home.points.toFixed(1)}/${home.allowed.toFixed(1)}. Not opponent-adjusted ratings.`, ...evidence } : unknown('Season-validated prior-year points for/allowed unavailable.'),

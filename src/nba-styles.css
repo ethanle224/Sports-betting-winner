@@ -86,11 +86,49 @@
 .nba-priced-option p { color: #c6d5d4; }
 .nba-pick-economics { font-weight: 700; }
 .nba-market-checks { border-top: 1px solid #355162; padding-top: 12px; }
-.nba-history-stats { display: flex; flex-wrap: wrap; gap: 10px; margin: 18px 0; }
-.nba-history-stats strong { padding: 12px; border: 1px solid #355162; color: #86f7d4; background: #102334; font: 700 12px 'DM Mono', monospace; }
-.nba-audit-summary, .nba-audit-report { border: 1px solid #355162; background: #102334; padding: 14px 16px; margin: 12px 0; overflow-wrap: anywhere; }
-.nba-audit-summary h4, .nba-audit-report h5, .nba-audit-report h6 { margin: 0 0 8px; color: #86f7d4; }
-.nba-audit-summary p, .nba-audit-report p { color: #c6d5d4; line-height: 1.5; }
-.nba-audit-report a { color: #86f7d4; }
+.nba-history-stats { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; margin: 18px 0; }
+.nba-history-stats strong { padding: 16px 10px; border: 1px solid #355162; border-radius: 7px; color: #e7f4ee; background: #102334; font: 700 12px 'DM Mono', monospace; }
+.nba-history-stats strong:last-child { color: #86f7d4; border-color: #438778; }
+.nba-board { display: grid; gap: 22px; margin-top: 22px; }
+.nba-board-group { border-left: 4px solid #81a8fa; padding-left: 12px; }
+.nba-board-group h4 { color: #b3c9ff; font: 700 17px system-ui, sans-serif; margin: 0 0 12px; }
+.nba-board-group h4 span { color: #9cadba; font: 500 12px system-ui, sans-serif; margin-left: 12px; }
+.nba-board-scroll { max-width: 100%; overflow-x: auto; }
+.nba-board table { width: 100%; min-width: 790px; border-collapse: separate; border-spacing: 0 3px; table-layout: fixed; text-align: left; }
+.nba-board th { padding: 7px 10px; color: #a4b5bc; font: 600 11px system-ui, sans-serif; }
+.nba-board th:first-child { width: 30%; }
+.nba-board th:nth-child(2) { width: 23%; }
+.nba-board th:nth-child(3) { width: 12%; }
+.nba-board th:nth-child(4) { width: 9%; }
+.nba-board th:nth-child(5) { width: 13%; }
+.nba-board th:nth-child(6) { width: 13%; }
+.nba-board td { padding: 11px 10px; vertical-align: top; background: #142738; color: #d7e5df; border-top: 1px solid #304455; border-bottom: 1px solid #304455; font-size: 12px; overflow-wrap: anywhere; }
+.nba-board td:first-child { border-left: 3px solid #677d96; }
+.nba-board-win td:first-child { border-left-color: #39b98c; }
+.nba-board-loss td:first-child { border-left-color: #ef797f; }
+.nba-board-fair-price td:first-child { border-left-color: #b99aed; }
+.nba-board td:last-child { border-right: 1px solid #304455; }
+.nba-board tr:hover td { background: #1a3446; }
+.nba-board-pick { display: grid; gap: 4px; }
+.nba-board-pick strong { color: #f0f8f5; font: 700 13px system-ui, sans-serif; }
+.nba-board-pick span, .nba-board-source { color: #a4b5bc; font-size: 11px; }
+.nba-board-reference { font-size: 11px; color: #b9cbd0; }
+.nba-board-reference strong, .nba-board-reference span, .nba-board-reference a, .nba-board-reference small { display: block; margin-bottom: 3px; }
+.nba-board-reference strong { color: #e5f2ed; }
+.nba-board-reference a { color: #98c8ff; }
+.nba-board-reference small { color: #9cadba; }
+.nba-board-status { display: inline-block; min-width: 70px; padding: 7px 5px; border-radius: 3px; text-align: center; font: 700 11px system-ui, sans-serif; background: #45617b; color: #fff; }
+.nba-board-status-win { background: #167956; }.nba-board-status-loss { background: #ad414e; }.nba-board-status-fair-price { background: #7952a2; }
+.nba-board-units { font: 700 13px 'DM Mono', monospace; white-space: nowrap; }
+.nba-board-details { margin-top: 8px; }
+.nba-board-details summary { color: #98c8ff; cursor: pointer; font-size: 11px; }
+.nba-board-detail-content { line-height: 1.55; overflow-wrap: anywhere; }
+.nba-board-detail-content code { font-size: 11px; white-space: normal; }
+.nba-board-detail-content p { margin: 10px 0; }
+.nba-board-detail-content a { color: #98c8ff; }
+.nba-board-notice { margin: 8px 0 0; color: #ffd295; font-size: 11px; }
+.nba-board .nba-review-form { margin: 10px 0 0; padding: 10px; }
+
 @media (max-width: 700px) { .nba-research .risk-card { width: 100%; } .nba-source-grid { grid-template-columns: 1fr; } .nba-moves li { grid-template-columns: 1fr; gap: 5px; } .sport-tabs { padding-top: 14px; } }
 @media (max-width: 1050px) { .nba-study-grid, .nba-evidence-grid { grid-template-columns: 1fr; } }
+@media (max-width: 700px) { .nba-history-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); } .nba-history-stats strong:last-child { grid-column: span 2; } .nba-board-group h4 span { display: block; margin: 5px 0 0; } .nba-freeze-panel { padding: 14px; } }

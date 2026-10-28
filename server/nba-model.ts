@@ -2,7 +2,7 @@
 export type NbaGame = { id: string; season: number; tip: string; home: string; away: string; homeScore: number; awayScore: number; neutral: boolean }
 export type NbaTarget = Pick<NbaGame, 'home' | 'away' | 'tip' | 'neutral'>
 export type NbaCalibration = { trainingSeason: number; sampleSize: number; homeAdvantage: number; marginSd: number; totalSd: number }
-export type NbaForecast = { model: 'nba-scores-v1'; expectedMargin: number; expectedTotal: number; homeWin: number; awayWin: number; marginSd: number; totalSd: number; homeAdvantage: number; headToHeadCount: number }
+export type NbaForecast = { model: 'nba-scores-v1' | 'nba-scores-v2' | 'nba-sides-v3'; expectedMargin: number; expectedTotal: number; homeWin: number; awayWin: number; marginSd: number; totalSd: number; homeAdvantage: number; headToHeadCount: number }
 
 const seasonAt = (tip: string) => { const d = new Date(tip); return d.getUTCFullYear() + (d.getUTCMonth() >= 7 ? 1 : 0) }
 const clamp = (value: number, low: number, high: number) => Math.max(low, Math.min(high, value))
@@ -72,12 +72,13 @@ export function fitNbaCalibration(games: NbaGame[]): NbaCalibration {
   return { trainingSeason: 2024, sampleSize: residuals.length, homeAdvantage, marginSd: sd('margin'), totalSd: sd('total') }
 }
 
-export function forecastNbaGame(target: NbaTarget, games: NbaGame[], calibration: NbaCalibration): NbaForecast | null {
+export function forecastNbaGame(target: NbaTarget, games: NbaGame[], calibration: NbaCalibration,
+  version: 'nba-scores-v1' | 'nba-scores-v2' = 'nba-scores-v1'): NbaForecast | null {
   if (!Number.isFinite(Date.parse(target.tip))) return null
   const projection = scoreProjection(target, games, calibration.homeAdvantage)
   if (!projection || calibration.marginSd <= 0 || calibration.totalSd <= 0) return null
   const homeWin = clamp(1 - cdf((0.5 - projection.expectedMargin) / calibration.marginSd), 0, 1)
-  return { model: 'nba-scores-v1', ...projection, homeWin, awayWin: 1 - homeWin,
+  return { model: version, ...projection, homeWin, awayWin: 1 - homeWin,
     marginSd: calibration.marginSd, totalSd: calibration.totalSd,
     homeAdvantage: target.neutral ? 0 : calibration.homeAdvantage,
     headToHeadCount: recentNbaMeetings(target, games).length }

@@ -12,12 +12,12 @@ const teams = Array.from({ length: 30 }, (_, i) => ({ team: { id: String(i + 1),
   { name: 'wins', displayValue: '50' }, { name: 'losses', displayValue: '32' },
 ] }))
 const standings = { season: { displayName: '2025-26' }, children: [{ standings: { entries: teams.slice(0, 15) } }, { standings: { entries: teams.slice(15) } }] }
-const scoreboard = { events: [{ id: '401', name: 'Team 1 at Team 0', date: '2026-10-20T19:00:00Z', season: { type: 2 }, competitions: [{ competitors: [
+const scoreboard = { events: [{ id: '401', name: 'Team 1 at Team 0', date: '2026-10-20T19:00:00Z', season: { type: 2 }, status: { type: { state: 'pre' } }, competitions: [{ competitors: [
   { homeAway: 'home', team: { id: '1' } }, { homeAway: 'away', team: { id: '2' } },
 ], neutralSite: false }] }] }
 
 describe('NBA research endpoint', () => {
-  afterEach(() => { vi.restoreAllMocks(); delete process.env.EDGEBOARD_SESSION_SECRET })
+  afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); delete process.env.EDGEBOARD_SESSION_SECRET })
   it('denies anonymous requests without fetching NBA data', async () => {
     const fetcher = vi.spyOn(globalThis, 'fetch')
     const res = response()
@@ -26,6 +26,7 @@ describe('NBA research endpoint', () => {
     expect(fetcher).not.toHaveBeenCalled()
   })
   it('returns sourced scores-only forecast and dated matchups without inventing ratings or picks', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true }); vi.setSystemTime(new Date('2026-10-19T20:00:00Z'))
     process.env.EDGEBOARD_SESSION_SECRET = 'test-secret'
     vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => ({ ok: true, json: async () => String(url).includes('standings') ? standings : scoreboard }) as Response)
     const res = response()
@@ -34,7 +35,7 @@ describe('NBA research endpoint', () => {
     expect(res.state.payload).toMatchObject({ priorSeason: '2025-26',
       ratingsStatus: 'unavailable', forecastStatus: 'experimental score-only',
       games: [{ id: '401', home: 'Team 0', away: 'Team 1', startsAt: '2026-10-20T19:00:00Z',
-        forecast: { model: 'nba-scores-v1', homeWin: expect.any(Number), expectedMargin: expect.any(Number) }, meetings: expect.any(Array),
+        forecast: { model: 'nba-scores-v2', homeWin: expect.any(Number), expectedMargin: expect.any(Number) }, meetings: expect.any(Array),
         venueContext: { home: { wins: expect.any(Number), losses: expect.any(Number), margin: expect.any(Number) },
           awayRoad: { wins: expect.any(Number), losses: expect.any(Number), margin: expect.any(Number) } } }] })
     expect((res.state.payload as { teams: unknown[] }).teams).toHaveLength(30)

@@ -8,7 +8,9 @@
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "test": "vitest run",
-    "typecheck": "tsc -b"
+    "typecheck": "tsc -b && tsc -p tsconfig.server.json",
+    "evaluate:nba": "tsx scripts/evaluate-nba-challenger.ts",
+    "capture:nba": "tsx scripts/capture-nba-forward.ts"
   },
   "dependencies": {
     "@vitejs/plugin-react": "latest",
@@ -30,6 +32,7 @@
     "eslint-plugin-react-refresh": "latest",
     "globals": "latest",
     "jsdom": "latest",
+    "tsx": "^4.23.15",
     "typescript": "~5.9.3",
     "typescript-eslint": "latest",
     "vitest": "latest"

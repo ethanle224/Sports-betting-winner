@@ -1,0 +1,24 @@
+{
+  "schema": "nba-challenger-calibration-v3",
+  "snapshotSha256": "8f7de95263d27fe457517887f8d9bbc1f3f6aae4b013349494007af61ba1a95c",
+  "config": {
+    "model": "nba-sides-v3",
+    "previousSeasons": 2,
+    "ridge": 12,
+    "seasonWeights": [1, 0.55, 0.25],
+    "halfLifeDays": 60,
+    "embargoHours": 6,
+    "minGames": 400,
+    "minTeamGames": 12,
+    "minCalibrationGames": 100,
+    "maxIterations": 500,
+    "tolerance": 1e-10
+  },
+  "calibration": {
+    "trainingSeason": 2025,
+    "baselineTrainingSeason": 2024,
+    "sampleSize": 1230,
+    "marginSd": 14.35181327481345,
+    "asOf": "2025-04-13T19:30:00Z"
+  }
+}

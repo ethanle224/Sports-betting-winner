@@ -19,6 +19,35 @@ const summary = { injuries: [
 const fetcher = vi.fn(async (url: string) => ({ ok: true, json: async () => url.includes('summary?') ? summary : stats(2026) } as Response))
 
 describe('NBA factor evidence', () => {
+  it('captures a source-stamped sportsbook reference spread with the correct favorite direction', async () => {
+    const withLine = vi.fn(async (url: string) => ({ ok: true, json: async () => url.includes('summary?') ? {
+      ...summary, pickcenter: [{ provider: { name: 'Draft Kings' }, details: 'BOS -3.5', spread: 3.5, overUnder: 224.5 }],
+    } : stats(2026) } as Response))
+    const result = await collectNbaFactors(game, history, now, withLine)
+    expect(result.pregameLine).toEqual({ homeSpread: 3.5, awaySpread: -3.5, total: 224.5, rawDetails: 'BOS -3.5',
+      provider: 'Draft Kings', observedAt: now,
+      source: `https://site.api.espn.com/apis/site/v2/sports/basketball/nba/summary?event=${game.gameId}` })
+  })
+  it('captures ESPN signed favorite spreads without changing the favorite direction', async () => {
+    const withSigned = vi.fn(async (url: string) => ({ ok: true, json: async () => url.includes('summary?') ? {
+      pickcenter: [{ provider: { name: 'Draft Kings' }, details: 'DET -2.5', spread: -2.5, overUnder: 224.5 }],
+    } : stats(2026) } as Response))
+    const result = await collectNbaFactors(game, history, now, withSigned)
+    expect(result.pregameLine).toMatchObject({ homeSpread: -2.5, awaySpread: 2.5, provider: 'Draft Kings' })
+  })
+  it('keeps an invalid sportsbook total unknown instead of guessing from the model', async () => {
+    const withBadTotal = vi.fn(async (url: string) => ({ ok: true, json: async () => url.includes('summary?') ?
+      { pickcenter: [{ provider: { name: 'Draft Kings' }, details: 'BOS -3.5', spread: 3.5, overUnder: 0 }] } : stats(2026) } as Response))
+    expect((await collectNbaFactors(game, history, now, withBadTotal)).pregameLine?.total).toBeNull()
+  })
+  it('does not invent a reference for mismatched team, inconsistent spread or missing odds', async () => {
+    for (const pickcenter of [[{ provider: { name: 'Draft Kings' }, details: 'NYK -3.5', spread: 3.5 }],
+      [{ provider: { name: 'Draft Kings' }, details: 'BOS -3.5', spread: 2.5 }], []]) {
+      const fetchLine = vi.fn(async (url: string) => ({ ok: true, json: async () => url.includes('summary?') ?
+        { pickcenter } : stats(2026) } as Response))
+      expect((await collectNbaFactors(game, history, now, fetchLine)).pregameLine).toBeNull()
+    }
+  })
   it('records dated reported injuries and validated prior-season pace, threes and assists without claiming current roster verification', async () => {
     const factors = await collectNbaFactors(game, history, now, fetcher)
     expect(factors.injuries).toMatchObject({ status: 'reported', players: [{ name: 'Player A', status: 'Out', team: 'Detroit' }] })

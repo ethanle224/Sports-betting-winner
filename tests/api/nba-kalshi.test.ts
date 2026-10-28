@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
-import { collectOpeningNbaMarkets, pricedNbaSide, rankOpeningNbaGame, OPENING_NBA_GAMES } from '../../server/nba-kalshi'
+import { collectOpeningNbaMarkets, pricedNbaSide, rankOpeningNbaGame, chooseNbaShadowSide, OPENING_NBA_GAMES } from '../../server/nba-kalshi'
 import type { NbaForecast } from '../../server/nba-model'
+import { nbaLineChance } from '../../server/nba-model'
 
 const market = (event: string, suffix: string, side: string) => ({ ticker: `${event}-${suffix}`, event_ticker: event,
   title: `${side} wins`, rules_primary: `If ${side} wins the Boston vs Detroit Pro Basketball game originally scheduled for Oct 20, 2026, then the market resolves to Yes.`,
@@ -45,6 +46,46 @@ describe('Opening NBA Kalshi research', () => {
     expect(ranked.checklist).toMatchObject({ injuryLineupVerified: false, rulesVerified: false, feeVerified: false })
   })
 
+  it('keeps the value-ranked baseline but shadows a higher-chance affordable spread', () => {
+    const game = OPENING_NBA_GAMES[0]
+    const dog = { ...snapshot[0], kind: 'moneyline' as const, team: 'away' as const, gameId: game.gameId, series: 'KXNBAGAME' as const }
+    const spread = { ...snapshot[0], ticker: 'KXNBASPREAD-26OCT20BOSDET-DET5', kind: 'spread' as const,
+      team: 'home' as const, line: 4.5, gameId: game.gameId, series: 'KXNBASPREAD' as const }
+    const books = { [dog.ticker]: { orderbook_fp: { no_dollars: [['0.78', '20']], yes_dollars: [] } },
+      [spread.ticker]: { orderbook_fp: { no_dollars: [], yes_dollars: [['0.50', '20']] } } }
+    const result = rankOpeningNbaGame(game, [dog, spread], books,
+      { ...forecast, expectedMargin: 2, homeWin: .65, awayWin: .35 }, 10,
+      { homeSpread: -4.5, awaySpread: 4.5, total: 222.5, rawDetails: 'DET -4.5', provider: 'Draft Kings',
+        source: 'https://example.org/line', observedAt: '2026-10-19T20:00:00Z' })
+    expect(result.studySide).toMatchObject({ ticker: dog.ticker, side: 'yes' })
+    expect(result.shadowSide).toMatchObject({ ticker: spread.ticker, side: 'no', market: 'spread' })
+    expect(result.shadowSide!.probability).toBeGreaterThan(result.studySide!.probability)
+  })
+  it('does not shadow an expensive high-chance choice with no credible post-fee value', () => {
+    const game = OPENING_NBA_GAMES[0]
+    const dog = { ...snapshot[0], kind: 'moneyline' as const, team: 'away' as const, gameId: game.gameId, series: 'KXNBAGAME' as const }
+    const ranked = rankOpeningNbaGame(game, [dog], { [dog.ticker]: { orderbook_fp: { no_dollars: [['0.21', '20']], yes_dollars: [] } } }, forecast, 10)
+    expect(ranked.shadowSide).toBeNull()
+  })
+
+  it('uses an extra near-market spread only for the shadow, never re-ranking a total baseline', () => {
+    const game = OPENING_NBA_GAMES[0]
+    const total = { ...snapshot[0], ticker: 'KXNBATOTAL-26OCT20BOSDET-224',
+      kind: 'total' as const, line: 223.5, gameId: game.gameId, series: 'KXNBATOTAL' as const }
+    const spread = { ...snapshot[0], ticker: 'KXNBASPREAD-26OCT20BOSDET-DET5', kind: 'spread' as const,
+      team: 'home' as const, line: 4.5, gameId: game.gameId, series: 'KXNBASPREAD' as const }
+    const books = { [total.ticker]: { orderbook_fp: { no_dollars: [['0.80', '20']], yes_dollars: [] } },
+      [spread.ticker]: { orderbook_fp: { no_dollars: [], yes_dollars: [['0.50', '20']] } } }
+    const reference = { homeSpread: -4.5, awaySpread: 4.5, total: 223.5, rawDetails: 'DET -4.5', provider: 'Draft Kings',
+      source: 'https://example.org/line', observedAt: '2026-10-19T20:00:00Z' }
+    const baseline = rankOpeningNbaGame(game, [total, spread], { [total.ticker]: books[total.ticker] }, forecast, 10, reference)
+    const expanded = rankOpeningNbaGame(game, [total, spread], books, forecast, 10, reference)
+    const challenger = chooseNbaShadowSide(expanded.candidates, baseline.studySide, [total, spread], reference)
+    expect(baseline.studySide?.ticker).toBe(total.ticker)
+    expect(challenger).toMatchObject({ ticker: spread.ticker, side: 'no' })
+    expect(baseline.studySide?.ticker).toBe(total.ticker)
+  })
+
   it('does not fabricate a valid bet when all quotes are unfavorable or missing', () => {
     const game = OPENING_NBA_GAMES[0]
     const books = Object.fromEntries(snapshot.map((m) => [m.ticker, { orderbook_fp: { no_dollars: [['0.10', '20']], yes_dollars: [] } }]))
@@ -52,6 +93,25 @@ describe('Opening NBA Kalshi research', () => {
     expect(ranked.studySide?.estimatedNetEdge).toBeLessThan(0)
     expect(ranked.qualifiedPaperPick).toBe(false)
     expect(rankOpeningNbaGame(game, [], {}, forecast, 10).studySide).toBeNull()
+  })
+  it('prefers a nearby priced total only if its post-fee model gap is competitive', () => {
+    const game = OPENING_NBA_GAMES[0]
+    const mk = (line: number) => ({ ...snapshot[0], ticker: `KXNBATOTAL-26OCT20BOSDET-${line}`,
+      kind: 'total' as const, line, gameId: game.gameId, series: 'KXNBATOTAL' as const })
+    const far = mk(205.5); const near = mk(221.5)
+    const books = Object.fromEntries([far, near].map((m) => {
+      const chance = nbaLineChance(forecast, 'over', m.line)!
+      const price = chance - (m === far ? .09 : .065)
+      return [m.ticker, { orderbook_fp: { no_dollars: [[String(1 - price), '20']], yes_dollars: [] } }]
+    }))
+    const reference = { homeSpread: 2.5, awaySpread: -2.5, total: 222.5, rawDetails: 'DET -2.5',
+      provider: 'Draft Kings', observedAt: '2026-10-19T20:00:00Z', source: 'https://example.org/source' }
+    const result = rankOpeningNbaGame(game, [far, near], books, forecast, 10, reference)
+    expect(result.candidates[0].ticker).toBe(far.ticker)
+    expect(result.studySide?.ticker).toBe(near.ticker)
+    expect(result.totalBenchmark.selectedDistance).toBe(1)
+    expect(rankOpeningNbaGame(game, [far, near], { [far.ticker]: books[far.ticker] }, forecast, 10, reference).studySide?.ticker).toBe(far.ticker)
+    expect(rankOpeningNbaGame(game, [far, near], books, forecast, 10).studySide?.ticker).toBe(far.ticker)
   })
   it('recognizes future full-game half-point spread and total rules without admitting integer pushes', async () => {
     const raw = [

@@ -1,5 +1,6 @@
 import { verifySessionToken } from '../server/auth-core.js'
 import { fitNbaCalibration, forecastNbaGame, recentNbaMeetings, type NbaGame } from '../server/nba-model.js'
+import { collectNbaCurrentHistory } from '../server/nba-current-history.js'
 import snapshot from '../server/data/nba-games.json' with { type: 'json' }
 
 type Request = { method?: string; headers?: { cookie?: string }; query?: { date?: string | string[] } }
@@ -50,6 +51,12 @@ export default async function handler(request: Request, response: Response): Pro
     if (teams.length !== 30 || new Set(teams.map((team) => team.id)).size !== 30 || teams.some((team) => !team.id || !team.name || !team.abbreviation ||
       ![team.pointsFor, team.pointsAgainst, team.wins, team.losses].every(Number.isFinite) || team.wins + team.losses < 70)) throw new Error('NBA team data incomplete')
     const byId = new Map(teams.map((team) => [team.id, team]))
+    const observedHistoryAt = new Date().toISOString()
+    const futureTips = schedule.events.filter((event) => event.season?.type === 2 && event.status?.type?.state === 'pre' &&
+      Date.parse(event.date ?? '') > Date.parse(observedHistoryAt)).map((event) => event.date!).sort()
+    const current = futureTips.length ? await collectNbaCurrentHistory(futureTips[0], observedHistoryAt) :
+      { games: [] as NbaGame[], sources: [] as string[], observedAt: observedHistoryAt }
+    const activeHistory = [...history, ...current.games]
     const games = schedule.events.filter((event) => event.season?.type === 2).map((event) => {
       const competition = event.competitions?.[0]
       const competitors = competition?.competitors ?? []
@@ -57,17 +64,17 @@ export default async function handler(request: Request, response: Response): Pro
       const away = byId.get(competitors.find((team) => team.homeAway === 'away')?.team?.id ?? '')
       if (!event.id || !home || !away || home.id === away.id || !event.date || !Number.isFinite(Date.parse(event.date)) || typeof competition?.neutralSite !== 'boolean') throw new Error('NBA event mapping incomplete')
       const target = { home: home.id, away: away.id, tip: event.date, neutral: competition.neutralSite }
-      // A frozen preseason snapshot must not silently act like a live in-season feed.
-      const recentEnough = Date.parse(event.date) <= Date.parse(snapshot.observedAt) + 21 * 86400000
-      const forecast = recentEnough ? forecastNbaGame(target, history, calibration) : null
-      const meetings = recentNbaMeetings(target, history).map((g) => ({ id: g.id, tip: g.tip, homeId: g.home, awayId: g.away,
+      const forecast = event.status?.type?.state === 'pre' && Date.parse(event.date) > Date.now() ?
+        forecastNbaGame(target, activeHistory, calibration, 'nba-scores-v2') : null
+      const meetings = recentNbaMeetings(target, activeHistory).map((g) => ({ id: g.id, tip: g.tip, homeId: g.home, awayId: g.away,
         homeScore: g.homeScore, awayScore: g.awayScore, neutral: g.neutral }))
       const venueContext = { home: venueRecord(home.id, 'home'), awayRoad: venueRecord(away.id, 'away') }
       return { id: event.id, home: home.name, away: away.name, homeId: home.id, awayId: away.id, startsAt: event.date,
         neutral: competition.neutralSite, status: event.status?.type?.state ?? 'unknown', forecast, meetings, venueContext }
     })
     response.status(200).json({ date, observedAt: new Date().toISOString(), priorSeason: '2025-26', teams, games,
-      sources: { standings: standingsSource, schedule: scheduleSource, history: snapshot.sources },
-      historyObservedAt: snapshot.observedAt, ratingsStatus: 'unavailable', forecastStatus: 'experimental score-only' })
+      sources: { standings: standingsSource, schedule: scheduleSource, history: snapshot.sources, currentHistory: current.sources },
+      historyObservedAt: current.observedAt, currentSeasonFinals: current.games.length,
+      ratingsStatus: 'unavailable', forecastStatus: 'experimental score-only' })
   } catch { response.status(502).json({ error: 'NBA source incomplete or unavailable; no partial matchup data returned' }) }
 }

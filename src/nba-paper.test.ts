@@ -32,6 +32,27 @@ describe('NBA paper-only opening-slate freeze', () => {
     expect(readNbaFreezes(storage)).toEqual([record])
     expect(() => trackNbaPick(storage, one, '401909834', '2026-10-20T20:01:00Z')).toThrow(/already tracking/i)
   })
+  it('freezes an independently quoted shadow contract alongside the unchanged primary pick', () => {
+    const shadow = { ...side, ticker: 'KXNBASPREAD-26OCT20BOSDET-DET5', market: 'spread', side: 'no', line: 4.5,
+      probability: .68, price: .50, allInCost: .518, estimatedNetEdge: .162,
+      rules: 'If Detroit wins by more than 4.5 points in the Boston vs Detroit game, then Yes.' }
+    const game = { ...scan.games[0], shadowSide: shadow, candidates: [side, shadow], inspected: [
+      ...scan.games[0].inspected, { ticker: shadow.ticker, observedAt: '2026-10-19T19:54:30Z', source: 'https://external-api.kalshi.com/trade-api/v2/markets/KXNBASPREAD-26OCT20BOSDET-DET5/orderbook',
+        book: { orderbook_fp: { yes_dollars: [['0.50', '10']], no_dollars: [] } } }] }
+    const storage = { getItem: () => null, setItem: () => {} }
+    const frozen = trackNbaPick(storage, { ...scan, marketInventory: [...scan.marketInventory, { ticker: shadow.ticker }], games: [game] }, game.gameId, now)
+    expect(frozen.decisions[0].selected).toEqual(side)
+    expect(frozen.decisions[0].shadow).toEqual(shadow)
+    expect(frozen.scan.marketInventory.map((item) => (item as { ticker: string }).ticker)).toContain(shadow.ticker)
+    game.shadowSide.allInCost = .9
+    expect(frozen.decisions[0].shadow?.allInCost).toBe(.518)
+  })
+  it('never freezes an uninspected shadow or treats it as the primary pick', () => {
+    const shadow = { ...side, ticker: 'UNINSPECTED', probability: .8 }
+    const frozen = freezeNbaStudy({ ...scan, games: [{ ...scan.games[0], shadowSide: shadow, candidates: [side, shadow] }] }, {}, now)
+    expect(frozen.decisions[0].selected).toEqual(side)
+    expect(frozen.decisions[0].shadow).toBeNull()
+  })
   it('tracks a single clicked game immediately as an unqualified one-unit pending study, once per game', () => {
     const memory = new Map<string, string>()
     const storage = { getItem: (key: string) => memory.get(key) ?? null, setItem: (key: string, value: string) => { memory.set(key, value) } }

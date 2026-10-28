@@ -5,7 +5,7 @@ export type NbaAuditResponse = { state: 'finalized' | 'pending' | 'needs_review'
   date?: string; gameId?: string; ticker?: string; observedAt?: string; result?: 'YES' | 'NO' | 'FAIR_PRICE';
   payoutYes?: number; scores?: { home: number; away: number } | null; rulesPrimary?: string; rulesSecondary?: string;
   marketSource?: string; scheduleSource?: string }
-export type NbaAuditReport = { id: string; scanId: string; gameId: string; ticker: string; date: string; observedAt: string;
+export type NbaAuditReport = { id: string; variant?: 'shadow'; scanId: string; gameId: string; ticker: string; date: string; observedAt: string;
   result: 'YES' | 'NO' | 'FAIR_PRICE'; outcome: 'WIN' | 'LOSS' | 'FAIR_PRICE'; payout: number;
   classification: 'CAUSE_UNDETERMINED'; explanation: string; marketSource: string; scheduleSource: string;
   actual: { home: number; away: number; total: number; homeMargin: number } | null;
@@ -28,14 +28,24 @@ export function readNbaAudits(storage: Storage): NbaAuditReport[] {
 
 export function auditTrackedPick(storage: Storage, frozen: NbaFreeze, gameId: string, fetched: NbaAuditResponse,
   nowIso = new Date().toISOString()): NbaAuditReport {
+  return auditPick(storage, frozen, gameId, fetched, nowIso, 'primary')
+}
+
+export function auditShadowPick(storage: Storage, frozen: NbaFreeze, gameId: string, fetched: NbaAuditResponse,
+  nowIso = new Date().toISOString()): NbaAuditReport {
+  return auditPick(storage, frozen, gameId, fetched, nowIso, 'shadow')
+}
+
+function auditPick(storage: Storage, frozen: NbaFreeze, gameId: string, fetched: NbaAuditResponse,
+  nowIso: string, variant: 'primary' | 'shadow'): NbaAuditReport {
   const saved = readNbaFreezes(storage).find((record) => record.id === frozen.id)
   if (!saved || JSON.stringify(saved) !== JSON.stringify(frozen)) throw new Error('Frozen paper decision changed or missing')
   const existingAudits = readNbaAudits(storage)
-  const id = `${frozen.id}:${gameId}`
+  const id = `${frozen.id}:${gameId}${variant === 'shadow' ? ':shadow' : ''}`
   if (existingAudits.some((item) => item.id === id)) throw new Error('Paper pick already audited')
   const decision = frozen.decisions.find((item) => item.gameId === gameId && item.selected && item.evidence?.requestedPaper)
   const game = frozen.scan.games.find((item) => item.gameId === gameId)
-  const side = decision?.selected
+  const side = variant === 'shadow' ? decision?.shadow : decision?.selected
   if (!decision || !game || !side) throw new Error('No tracked paper pick to audit')
   const when = Date.parse(fetched.observedAt ?? '')
   const now = Date.parse(nowIso)
@@ -45,7 +55,7 @@ export function auditTrackedPick(storage: Storage, frozen: NbaFreeze, gameId: st
     fetched.ticker !== side.ticker || fetched.gameId !== gameId || fetched.date !== frozen.scan.date ||
     fetched.rulesPrimary !== side.rules || fetched.rulesSecondary !== side.rulesSecondary ||
     fetched.marketSource !== marketSource || fetched.scheduleSource !== scheduleSource ||
-    !Number.isFinite(now) || !Number.isFinite(when) || when > now || when <= Date.parse(game.startsAt) ||
+    !Number.isFinite(now) || !Number.isFinite(when) || when > now + 5 * 60_000 || when <= Date.parse(game.startsAt) ||
     !Number.isFinite(fetched.payoutYes) || fetched.payoutYes! < 0 || fetched.payoutYes! > 1 ||
     (fetched.result === 'YES' && fetched.payoutYes !== 1) || (fetched.result === 'NO' && fetched.payoutYes !== 0) ||
     (fetched.result === 'FAIR_PRICE' && (fetched.payoutYes! <= 0 || fetched.payoutYes! >= 1))) {
@@ -58,7 +68,7 @@ export function auditTrackedPick(storage: Storage, frozen: NbaFreeze, gameId: st
   }
   const payout = side.side === 'yes' ? fetched.payoutYes! : 1 - fetched.payoutYes!
   const outcome = fetched.result === 'FAIR_PRICE' ? 'FAIR_PRICE' : payout === 1 ? 'WIN' : 'LOSS'
-  const priorReview = readNbaReviews(storage).find((item) => item.id === id)
+  const priorReview = variant === 'primary' ? readNbaReviews(storage).find((item) => item.id === id) : null
   if (priorReview && (priorReview.outcome !== fetched.result || Math.abs(priorReview.payout - payout) > .00001)) {
     throw new Error('Public settlement conflicts with an earlier manual review; inspect before proceeding')
   }
@@ -81,7 +91,7 @@ export function auditTrackedPick(storage: Storage, frozen: NbaFreeze, gameId: st
     recommendations.push('Study the score residual against the frozen projection and comparable games; a large residual is a diagnostic, not proof of its cause.')
   }
   if (outcome === 'FAIR_PRICE') recommendations.push('Review the postponement and fair-price clause separately from basketball prediction quality.')
-  const report: NbaAuditReport = { id, scanId: frozen.id, gameId, ticker: side.ticker, date: frozen.scan.date, observedAt: fetched.observedAt!,
+  const report: NbaAuditReport = { id, ...(variant === 'shadow' ? { variant } as const : {}), scanId: frozen.id, gameId, ticker: side.ticker, date: frozen.scan.date, observedAt: fetched.observedAt!,
     result: fetched.result!, outcome, payout, classification: 'CAUSE_UNDETERMINED',
     explanation: outcome === 'FAIR_PRICE' ? 'Contract paid a nonbinary fair price; basketball model accuracy is not scored for this resolution. Cause of the contract exception requires separate review.' :
       'The contract outcome and final score are verified. One game cannot establish whether the result was caused by a model error, normal outcome variance or an unmeasured roster/event change.',
@@ -91,10 +101,13 @@ export function auditTrackedPick(storage: Storage, frozen: NbaFreeze, gameId: st
       expectedMargin, expectedTotal, marginResidual: actual && expectedMargin !== null ? actual.homeMargin - expectedMargin : null,
       totalResidual: actual && expectedTotal !== null ? actual.total - expectedTotal : null },
     gaps, recommendations }
-  if (!priorReview) {
+  if (variant === 'primary' && !priorReview) {
     appendNbaReview(storage, { scanId: frozen.id, gameId, observedAt: fetched.observedAt!, source: marketSource,
       outcome: fetched.result!, payout,
-      note: 'Read-only finalized Kalshi payout checked against the exact frozen contract and ESPN final score or nonbinary fair-price resolution.' }, nowIso)
+      note: 'Read-only finalized Kalshi payout checked against the exact frozen contract and ESPN final score or nonbinary fair-price resolution.' },
+    // The server observed the verified outcome; bounded browser clock skew must
+    // not turn its valid timestamp into a future-dated manual review.
+    new Date(Math.max(now, when)).toISOString())
   }
   // Separate append-only report: a failed write can be retried without rewriting an existing review.
   storage.setItem(NBA_AUDIT_KEY, JSON.stringify([...existingAudits, report]))
@@ -102,7 +115,7 @@ export function auditTrackedPick(storage: Storage, frozen: NbaFreeze, gameId: st
 }
 
 export function auditSummary(reports: NbaAuditReport[]) {
-  const binary = reports.filter((report) => report.actual && report.model.brier !== null && report.model.priceBrier !== null)
+  const binary = reports.filter((report) => report.variant !== 'shadow' && report.actual && report.model.brier !== null && report.model.priceBrier !== null)
   const average = (key: 'brier' | 'priceBrier') => binary.length ? binary.reduce((sum, report) => sum + report.model[key]!, 0) / binary.length : null
-  return { count: reports.length, binaryCount: binary.length, modelBrier: average('brier'), snapshotPriceBrier: average('priceBrier') }
+  return { count: reports.filter((report) => report.variant !== 'shadow').length, binaryCount: binary.length, modelBrier: average('brier'), snapshotPriceBrier: average('priceBrier') }
 }

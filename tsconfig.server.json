@@ -1,0 +1,8 @@
+{
+  "extends": "./tsconfig.app.json",
+  "compilerOptions": {
+    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.server.tsbuildinfo",
+    "resolveJsonModule": true
+  },
+  "include": ["api/nba-*.ts", "server/nba-*.ts", "scripts/*nba*.ts"]
+}

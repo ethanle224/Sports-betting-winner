@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { appendNbaFreeze, appendNbaReview, freezeNbaStudy, readNbaFreezes, readNbaReviews, type NbaScan } from './nba-paper'
-import { auditTrackedPick, NBA_AUDIT_KEY, readNbaAudits } from './nba-audit'
+import { auditTrackedPick, auditShadowPick, NBA_AUDIT_KEY, readNbaAudits } from './nba-audit'
 
 const ticker = 'KXNBAGAME-26OCT20BOSDET-BOS'
 const rules = 'If Boston wins the Boston vs Detroit Pro Basketball game originally scheduled for Oct 20, 2026, then the market resolves to Yes.'
@@ -28,6 +28,24 @@ function fixture(override?: NbaScan) {
   return { storage, frozen, memory }
 }
 describe('source-backed append-only NBA paper audit', () => {
+  it('settles a separately frozen shadow contract from its own exact public payout without altering primary results', () => {
+    const challenger = { ...scan.games[0].studySide!, ticker: 'KXNBASPREAD-26OCT20BOSDET-BOS5',
+      market: 'spread', side: 'no', line: 4.5, probability: .68, allInCost: .52, estimatedNetEdge: .16,
+      rules: 'If Boston wins by more than 4.5 points in the Boston vs Detroit game, then Yes.' }
+    const withShadow: NbaScan = { ...scan, games: [{ ...scan.games[0], shadowSide: challenger,
+      candidates: [scan.games[0].studySide!, challenger], inspected: [{ ticker: challenger.ticker, observedAt: '2026-10-19T19:54:30Z',
+        source: 'https://external-api.kalshi.com/trade-api/v2/markets/KXNBASPREAD-26OCT20BOSDET-BOS5/orderbook', book: {} }] }] }
+    const { storage, frozen } = fixture(withShadow)
+    const primary = auditTrackedPick(storage, frozen, '401909088', response, '2026-10-21T04:05:00Z')
+    const separate = { ...response, ticker: challenger.ticker, rulesPrimary: challenger.rules,
+      marketSource: `https://external-api.kalshi.com/trade-api/v2/markets/${challenger.ticker}` }
+    expect(() => auditShadowPick(storage, frozen, '401909088', { ...separate, rulesPrimary: 'wrong rule' }, '2026-10-21T04:05:00Z')).toThrow()
+    const shadow = auditShadowPick(storage, frozen, '401909088', separate, '2026-10-21T04:05:00Z')
+    expect(shadow).toMatchObject({ id: `${primary.id}:shadow`, variant: 'shadow', outcome: 'WIN', payout: 1, ticker: challenger.ticker })
+    expect(readNbaReviews(storage)[0]).toMatchObject({ payout: 0, simulatedNetUnits: -1 })
+    expect(readNbaAudits(storage)).toEqual([primary, shadow])
+    expect(() => auditShadowPick(storage, frozen, '401909088', separate, '2026-10-21T04:05:00Z')).toThrow(/already audited/i)
+  })
   it('auto-reviews only a previously tracked exact settled contract and retains scored model diagnostics', () => {
     const { storage, frozen } = fixture()
     const report = auditTrackedPick(storage, frozen, '401909088', response, '2026-10-21T04:05:00Z')
@@ -41,6 +59,18 @@ describe('source-backed append-only NBA paper audit', () => {
     expect(readNbaAudits(storage)).toEqual([report])
     expect(readNbaFreezes(storage)[0]).toEqual(frozen)
     expect(() => auditTrackedPick(storage, frozen, '401909088', response, '2026-10-21T04:05:00Z')).toThrow(/already audited/i)
+  })
+  it('accepts a trusted final observation within a small server/browser clock skew', () => {
+    const { storage, frozen } = fixture()
+    const report = auditTrackedPick(storage, frozen, '401909088', response, '2026-10-21T03:59:30Z')
+    expect(report.outcome).toBe('LOSS')
+    expect(readNbaReviews(storage)[0].observedAt).toBe(response.observedAt)
+    expect(readNbaAudits(storage)).toHaveLength(1)
+  })
+  it('rejects a purported final observation too far ahead of the browser clock', () => {
+    const { storage, frozen } = fixture()
+    expect(() => auditTrackedPick(storage, frozen, '401909088', response, '2026-10-21T03:54:00Z')).toThrow(/finalized contract/i)
+    expect(readNbaReviews(storage)).toHaveLength(0)
   })
   it('handles a winning NO position and a nonbinary fair-price payout without inventing a basketball cause', () => {
     const noSide: NbaScan = { ...scan, games: scan.games.map((game) => ({ ...game, studySide: { ...game.studySide!, side: 'no' } })) }

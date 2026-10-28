@@ -1,4 +1,5 @@
 import { nbaLineChance, type NbaForecast } from './nba-model.js'
+import type { NbaPregameLine } from './nba-factors.js'
 
 const BASE = 'https://external-api.kalshi.com/trade-api/v2'
 const SERIES = ['KXNBAGAME', 'KXNBASPREAD', 'KXNBATOTAL'] as const
@@ -132,13 +133,49 @@ function probability(m: NbaMarket, forecast: NbaForecast): number | null {
   return homeCover === null ? null : m.team === 'home' ? homeCover : 1 - homeCover
 }
 
-export function rankOpeningNbaGame(game: OpeningNbaGame, markets: NbaMarket[], books: Record<string, NbaBook>, forecast: NbaForecast | null, quantity: number) {
+export type NbaPricedCandidate = { ticker: string; market: NbaMarket['kind']; side: 'yes' | 'no'; line: number | null;
+  probability: number; price: number; feeEstimate: number; allInCost: number; estimatedNetEdge: number;
+  rules: string; rulesSecondary: string }
+
+// Same-quote descriptive comparison. Active selection MUST additionally pass
+// applyNbaPlayerSelectionPolicy; this callback alone is not primary evidence.
+export function compareNbaPlayerTotals(candidates: NbaPricedCandidate[],
+  chance: (kind: 'over' | 'under', line: number) => number | null, mode: 'shadow' | 'main' = 'shadow') {
+  const sort = (a: NbaPricedCandidate, b: NbaPricedCandidate) =>
+    b.estimatedNetEdge - a.estimatedNetEdge || b.probability - a.probability ||
+    a.ticker.localeCompare(b.ticker) || a.side.localeCompare(b.side)
+  const baselineCandidates = candidates.filter((side) => side.market === 'total').map((side) => ({ ...side })).sort(sort)
+  const rescored = baselineCandidates.flatMap((side) => {
+    if (side.line === null) return []
+    const probability = chance(side.side === 'yes' ? 'over' : 'under', side.line)
+    return probability === null || !Number.isFinite(probability) || probability < 0 || probability > 1 ? [] :
+      [{ ...side, probability, estimatedNetEdge: probability - side.allInCost }]
+  }).sort(sort)
+  return { status: mode === 'main' ? 'PAPER_ONLY_EXPERIMENT' as const : 'SHADOW_ONLY' as const,
+    promotionGate: mode === 'main' ? 'USER_APPROVED_PAPER_ONLY' as const : 'UNVALIDATED_FORWARD_ONLY' as const,
+    rankingRule: 'estimatedNetEdge descending, probability descending, ticker/side ascending' as const,
+    baselineCandidates: mode === 'main' ? candidates.map((side) => ({ ...side })) : baselineCandidates,
+    baselineStudySide: baselineCandidates.find((side) => side.estimatedNetEdge > 0) ?? null,
+    candidates: rescored, studySide: rescored.find((side) => side.estimatedNetEdge > 0) ?? null }
+}
+
+export function chooseNbaShadowSide(candidates: NbaPricedCandidate[], studySide: NbaPricedCandidate | null,
+  markets: NbaMarket[], reference: NbaPregameLine | null): NbaPricedCandidate | null {
+  return [...candidates].filter((candidate) =>
+    (candidate.market === 'moneyline' || candidate.market === 'spread') &&
+    candidate.probability >= 0.55 && candidate.probability > (studySide?.probability ?? 0) &&
+    candidate.allInCost <= 1 / 1.7 && candidate.estimatedNetEdge >= 0.03 &&
+    (candidate.market !== 'spread' || (reference && candidate.line !== null &&
+      Math.abs((markets.find((m) => m.ticker === candidate.ticker)?.team === 'home' ? -1 : 1) * candidate.line - reference.homeSpread) <= 3)))
+    .sort((a, b) => b.probability - a.probability || b.estimatedNetEdge - a.estimatedNetEdge)[0] ?? null
+}
+
+export function rankOpeningNbaGame(game: OpeningNbaGame, markets: NbaMarket[], books: Record<string, NbaBook>, forecast: NbaForecast | null, quantity: number,
+  reference: NbaPregameLine | null = null) {
   const matching = markets.filter((m) => m.gameId === game.gameId)
   const coverage = { moneyline: matching.filter((m) => m.kind === 'moneyline').length,
     spread: matching.filter((m) => m.kind === 'spread').length, total: matching.filter((m) => m.kind === 'total').length }
-  const candidates = [] as { ticker: string; market: NbaMarket['kind']; side: 'yes' | 'no'; line: number | null;
-    probability: number; price: number; feeEstimate: number; allInCost: number; estimatedNetEdge: number;
-    rules: string; rulesSecondary: string }[]
+  const candidates: NbaPricedCandidate[] = []
   if (forecast) for (const market of matching) {
     const p = probability(market, forecast)
     if (p === null) continue
@@ -152,7 +189,30 @@ export function rankOpeningNbaGame(game: OpeningNbaGame, markets: NbaMarket[], b
     }
   }
   candidates.sort((a, b) => b.estimatedNetEdge - a.estimatedNetEdge)
-  return { gameId: game.gameId, coverage, pricedSides: candidates.length, candidates, studySide: candidates[0] ?? null,
+  const best = candidates[0] ?? null
+  const refTotal = reference?.total ?? null
+  const nearTotal = refTotal === null ? null : candidates.find((candidate) => candidate.market === 'total' &&
+    candidate.line !== null && Math.abs(candidate.line - refTotal) <= 3 && candidate.estimatedNetEdge > 0) ?? null
+  // Closer-to-consensus is only a tiebreak among plausible priced contracts.
+  // A worse quote is NOT automatically safer; refuse to sacrifice >5pp of
+  // estimated net gap based on an uncalibrated forecast.
+  const preferNear = best?.market === 'total' && best.line !== null && refTotal !== null &&
+    Math.abs(best.line - refTotal) > 6 && nearTotal && nearTotal.estimatedNetEdge >= best.estimatedNetEdge - 0.05
+  const studySide = preferNear ? nearTotal : best
+  // Shadow-only challenger: a more likely outcome must also be a reasonably
+  // priced, positive-gap contract. This does not change the live study ranking.
+  // 1.7x gross return is a research floor, not a profitability guarantee.
+  const shadowSide = chooseNbaShadowSide(candidates, studySide, matching, reference)
+  const totalBenchmark = { reference: refTotal, provider: reference?.provider ?? null,
+    selectedDistance: studySide?.market === 'total' && studySide.line !== null && refTotal !== null ?
+      Math.abs(studySide.line - refTotal) : null,
+    reason: refTotal === null ? 'Independent pregame total unavailable; no consensus-line safety inference.' :
+      preferNear ? 'Selected priced total nearer independent sportsbook total with positive estimated net gap; not a guaranteed safer outcome.' :
+        best?.market === 'total' && best.line !== null && Math.abs(best.line - refTotal) > 6 ?
+          'Selected total differs materially from sportsbook total; nearer positive-value alternative unavailable or costs too much.' :
+          'Sportbook total is context; Kalshi quote, exact contract and costs still decide.' }
+  return { gameId: game.gameId, coverage, pricedSides: candidates.length, candidates, studySide, shadowSide,
+    totalBenchmark,
     qualifiedPaperPick: false as const,
     checklist: { mappedGame: true, modelScoreOnly: !!forecast, injuryLineupVerified: false, rulesVerified: false,
       feeVerified: false, executableDepthInspected: candidates.length > 0, settlementFairPriceRisk: true } }
