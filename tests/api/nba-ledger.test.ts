@@ -62,6 +62,12 @@ describe('owner-scoped NBA ledger', () => {
     expect(dataQueries().at(-1)?.[1]).toEqual(['Admin', 'freeze', freeze.id])
   })
 
+  it('compares replayed JSON safely when a data field shadows hasOwnProperty', async () => {
+    const record = { ...freeze, hasOwnProperty: 'data, not a method' }
+    dbReplies({ rowCount: 0, rows: [] }, { rows: [{ record }] })
+    expect((await call('POST', { kind: 'freeze', record })).code).toBe(200)
+  })
+
   it.each([['review', review], ['audit', audit]] as const)('accepts a valid %s record', async (kind, record) => {
     dbReplies({ rowCount: 1, rows: [{ record }] })
     expect((await call('POST', { kind, record })).code).toBe(201)

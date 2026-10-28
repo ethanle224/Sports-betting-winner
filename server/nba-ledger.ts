@@ -92,5 +92,5 @@ function equalJson(left: unknown, right: unknown): boolean {
   if (!object(left) || !object(right)) return false
   const keys = Object.keys(left)
   return keys.length === Object.keys(right).length &&
-    keys.every((key) => Object.hasOwn(right, key) && equalJson(left[key], right[key]))
+    keys.every((key) => Object.prototype.hasOwnProperty.call(right, key) && equalJson(left[key], right[key]))
 }
