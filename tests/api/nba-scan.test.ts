@@ -4,6 +4,8 @@ import handler from '../../api/nba-scan'
 import { freezeNbaStudy, type NbaScan } from '../../src/nba-paper'
 import { pricedNbaSide } from '../../server/nba-kalshi'
 import * as playerTotalsModule from '../../server/nba-player-totals'
+import * as nbaModelModule from '../../server/nba-model'
+import { readFileSync } from 'node:fs'
 
 function response() {
   const state: { code: number; payload: unknown } = { code: 0, payload: null }
@@ -22,7 +24,7 @@ const winner = (event: string, city: string, side: string) => ({ ticker: `${even
 const markets = [winner('KXNBAGAME-26OCT20BOSDET', 'Boston', 'BOS'), winner('KXNBAGAME-26OCT20BOSDET', 'Detroit', 'DET'),
   winner('KXNBAGAME-26OCT20PHINYK', 'Philadelphia', 'PHI'), winner('KXNBAGAME-26OCT20PHINYK', 'New York', 'NYK'),
   winner('KXNBAGAME-26OCT20OKCSAS', 'Oklahoma City', 'OKC'), winner('KXNBAGAME-26OCT20OKCSAS', 'San Antonio', 'SAS')]
-const mockFetch = (schedule = events, rateLimitFirstBook = false, withPregameLine = false) => {
+const mockFetch = (schedule: unknown[] = events, rateLimitFirstBook = false, withPregameLine = false) => {
   let bookAttempts = 0
   return vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => {
   const u = String(url)
@@ -35,6 +37,72 @@ const mockFetch = (schedule = events, rateLimitFirstBook = false, withPregameLin
 }
 
 describe('NBA Kalshi opening-slate scanner', () => {
+  it('configures enough serverless duration for the bounded all-line collection', () => {
+    const config = JSON.parse(readFileSync('vercel.json', 'utf8'))
+    expect(config.functions['api/nba-scan.ts'].maxDuration).toBe(300)
+  })
+  it('fails the whole scan without partial paper picks when any required orderbook read fails', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true }); vi.setSystemTime(new Date('2026-10-19T20:00:00Z'))
+    process.env.EDGEBOARD_SESSION_SECRET = 'test-secret'
+    const fetcher = mockFetch([events[0]])
+    const original = fetcher.getMockImplementation()!
+    fetcher.mockImplementation((url, init) => String(url).includes('/orderbook') ?
+      Promise.resolve({ ok: false, status: 503, body: { cancel: async () => {} } } as unknown as Response) : original(url, init))
+    const res = response()
+    await handler({ method: 'GET', query: { date: '2026-10-20' }, headers: { cookie } }, res)
+    expect(res.state.code).toBe(502)
+    expect(res.state.payload).toEqual({ error: expect.stringContaining('no partial picks returned') })
+  })
+  it('does not select a new paper side if tip passes during model collection', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true }); vi.setSystemTime(new Date('2026-10-19T20:00:00Z'))
+    process.env.EDGEBOARD_SESSION_SECRET = 'test-secret'
+    mockFetch([events[0]])
+    vi.spyOn(playerTotalsModule, 'collectNbaPlayerTotals').mockImplementation(async () => {
+      vi.setSystemTime(new Date(Date.parse(events[0].date) + 1000))
+      return { version: 'nba-player-totals-v2', status: 'estimated', eligibleForPrimary: true,
+        observedAt: '2026-10-19T20:00:00Z', asOfCutoff: null, simulations: 1000, seed: 'tipped', sources: [], assumptions: [], unknowns: [], reason: null, reasons: [],
+        totals: Array(1000).fill(230), scores: Array(1000).fill({ home: 120, away: 110, overtimePeriods: 0 }), expectedTotal: 230, totalSd: 0, inputs: null }
+    })
+    const res = response()
+    await handler({ method: 'GET', query: { date: '2026-10-20' }, headers: { cookie } }, res)
+    expect(res.state.code).toBe(200)
+    expect((res.state.payload as NbaScan).games[0].studySide).toBeNull()
+  })
+  it('inspects ALL supported lines and can choose a distant spread without an old-model forecast', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true }); vi.setSystemTime(new Date('2026-10-19T20:00:00Z'))
+    process.env.EDGEBOARD_SESSION_SECRET = 'test-secret'
+    vi.spyOn(nbaModelModule, 'forecastNbaGame').mockReturnValue(null)
+    vi.spyOn(playerTotalsModule, 'collectNbaPlayerTotals').mockResolvedValue({
+      version: 'nba-player-totals-v2', status: 'estimated', eligibleForPrimary: true,
+      observedAt: '2026-10-19T20:00:00Z', asOfCutoff: null, simulations: 1000,
+      seed: 'all-lines', sources: [], assumptions: [], unknowns: [], reason: null, reasons: [],
+      totals: Array(1000).fill(230), scores: Array(1000).fill({ home: 120, away: 110, overtimePeriods: 0 }), expectedTotal: 230, totalSd: 0, inputs: null,
+    })
+    const spreads = [1.5, 2.5, 3.5, 4.5, 5.5, 6.5, 35.5].map((line) => ({
+      ticker: `KXNBASPREAD-26OCT20BOSDET-BOS${line + .5}`, event_ticker: 'KXNBASPREAD-26OCT20BOSDET', title: `Boston over ${line}`,
+      rules_primary: `If Boston wins by more than ${line} points in the Boston vs Detroit Pro Basketball game originally scheduled for Oct 20, 2026, then the market resolves to Yes.`,
+      rules_secondary: 'If postponed by more than 48 hours, resolves to a fair price.',
+    }))
+    const fetcher = vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => {
+      const u = String(url)
+      return { ok: true, json: async () => u.includes('scoreboard') ? { events: [events[0]] } : u.includes('/orderbook') ?
+        { orderbook_fp: { yes_dollars: [[u.includes('BOS36/') ? '0.7' : '0.1', '100']], no_dollars: [['0.1', '100']] } } :
+        { markets: u.includes('KXNBASPREAD') ? spreads : u.includes('KXNBAGAME') ? markets.slice(0, 2) : [], cursor: '' } } as Response
+    })
+    const res = response()
+    await handler({ method: 'GET', query: { date: '2026-10-20', quantity: '10' }, headers: { cookie } }, res)
+    expect(res.state.code).toBe(200)
+    const game = (res.state.payload as NbaScan).games[0]
+    expect(game.marketInspection).toEqual({ mode: 'ALL_SUPPORTED_OPEN_MARKETS', listed: 9, inspected: 9, complete: true })
+    expect(game.inspected).toHaveLength(9)
+    expect(game.selectionPolicy).toBe('nba-primary-v5-player-markets-v2')
+    expect(game.studySide).toMatchObject({ ticker: spreads[6].ticker, market: 'spread', side: 'no', probability: 1 })
+    expect(game.candidates).toHaveLength(18)
+    expect(game.forecast).toBeNull()
+    expect(game.playerTotals?.marketComparison?.studySide).toEqual(game.studySide)
+    expect(fetcher.mock.calls.filter(([u]) => String(u).includes('/orderbook'))).toHaveLength(9)
+    expect(() => freezeNbaStudy(res.state.payload as NbaScan, {}, new Date().toISOString())).not.toThrow()
+  })
   it('includes an observed sportsbook reference in the pre-tip scan without replacing the selected Kalshi contract', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true }); vi.setSystemTime(new Date('2026-10-19T20:00:00Z'))
     process.env.EDGEBOARD_SESSION_SECRET = 'test-secret'
@@ -68,6 +136,13 @@ describe('NBA Kalshi opening-slate scanner', () => {
   it('inspects a sportsbook-near spread for shadow comparison without adding it to baseline ranking', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true }); vi.setSystemTime(new Date('2026-10-19T20:00:00Z'))
     process.env.EDGEBOARD_SESSION_SECRET = 'test-secret'
+    vi.spyOn(playerTotalsModule, 'collectNbaPlayerTotals').mockResolvedValue({
+      version: 'nba-player-totals-v2', status: 'estimated', eligibleForPrimary: true,
+      observedAt: '2026-10-19T20:00:00Z', asOfCutoff: null, simulations: 1000,
+      seed: 'shadow-integration', sources: [], assumptions: [], unknowns: [], reason: null, reasons: [],
+      totals: Array(1000).fill(230), scores: Array(1000).fill({ home: 120, away: 110, overtimePeriods: 0 }),
+      expectedTotal: 230, totalSd: 0, inputs: null,
+    })
     const spreads = [1.5, 2.5, 3.5, 4.5, 25.5].map((line) => ({
       ticker: `KXNBASPREAD-26OCT20BOSDET-BOS${line + 0.5}`, event_ticker: 'KXNBASPREAD-26OCT20BOSDET',
       title: `Boston wins by over ${line} points`,
@@ -89,6 +164,12 @@ describe('NBA Kalshi opening-slate scanner', () => {
     expect(fetcher.mock.calls.some(([url]) => String(url).includes(`${spreads[4].ticker}/orderbook`))).toBe(true)
     expect(game.inspected.some((book) => book.ticker === spreads[4].ticker)).toBe(true)
     expect(game.studySide?.ticker).not.toBe(spreads[4].ticker)
+    expect(game.playerTotals?.marketComparison?.candidates).toEqual(expect.arrayContaining([
+      expect.objectContaining({ ticker: spreads[4].ticker, market: 'spread', side: 'yes', probability: 0 }),
+      expect.objectContaining({ market: 'moneyline', probability: 1 }),
+    ]))
+    expect(game.playerTotals?.marketComparison?.promotionGate).toBe('USER_APPROVED_PAPER_ONLY')
+    expect(game.studySide?.market).toBe('moneyline')
   })
   afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); delete process.env.EDGEBOARD_SESSION_SECRET })
   it.each([1, 10, 100])('retains the same priced total at requested quantity %s without assuming ten contracts', async (quantity) => {
@@ -119,7 +200,7 @@ describe('NBA Kalshi opening-slate scanner', () => {
     expect(body.quantity).toBe(quantity)
     expect(game.baselineStudySide).toMatchObject({ ticker: total.ticker, side: 'no',
       price: quote.price, feeEstimate: quote.feeEstimate, allInCost: quote.allInCost })
-    expect(game.selectionPolicy).toBe('nba-primary-v4-player-totals-v2')
+    expect(game.selectionPolicy).toBe('nba-primary-v5-player-markets-v2')
     expect(game.studySide).toEqual(game.playerTotals?.comparison.studySide)
     expect(game.studySide?.probability).toBe(1)
     expect(game.candidates).toEqual(game.playerTotals?.comparison.candidates)
@@ -135,6 +216,9 @@ describe('NBA Kalshi opening-slate scanner', () => {
       expect.any(Array), expect.any(String), expect.any(Function), expect.any(Map))
     expect(game.playerTotals?.simulation).toEqual(simulation)
     expect(game.playerTotals?.comparison.candidates).toHaveLength(2)
+    expect(game.playerTotals?.marketComparison).toMatchObject({ status: 'PAPER_ONLY_EXPERIMENT',
+      promotionGate: 'USER_APPROVED_PAPER_ONLY', studySide: { ticker: total.ticker, side: 'yes' } })
+    expect(game.playerTotals?.marketComparison?.candidates).toHaveLength(2)
     expect(game.playerTotals?.comparison.studySide).toMatchObject({ ticker: total.ticker, side: 'yes', probability: 1 })
     expect(game.studySide?.side).toBe('yes')
     const playerQuote = pricedNbaSide(book, 'yes', quantity)!
@@ -157,7 +241,7 @@ describe('NBA Kalshi opening-slate scanner', () => {
     expect(res.state.code).toBe(400)
     expect(fetcher).not.toHaveBeenCalled()
   })
-  it('pauses unvalidated ML primaries but retains baseline prices and honest coverage', async () => {
+  it('abstains when v2 is unavailable but retains baseline ML prices and honest coverage', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true }); vi.setSystemTime(new Date('2026-10-19T20:00:00Z'))
     process.env.EDGEBOARD_SESSION_SECRET = 'test-secret'
     const fetcher = mockFetch()
@@ -171,7 +255,7 @@ describe('NBA Kalshi opening-slate scanner', () => {
       sources: unknown; marketObservedAt: string; marketInventory: { ticker: string; raw: { ticker: string } }[] }
     expect(body.games).toHaveLength(3)
     expect(body.games.every((g) => g.studySide === null && g.baselineStudySide?.ticker.startsWith('KXNBAGAME-26OCT20') &&
-      g.selectionPolicy === 'nba-primary-v4-player-totals-v2' && g.abstentionReason?.includes('no fallback') &&
+      g.selectionPolicy === 'nba-primary-v5-player-markets-v2' && g.abstentionReason?.includes('no fallback') &&
       !g.qualifiedPaperPick && g.coverage.spread === 0 && g.coverage.total === 0)).toBe(true)
     expect(body.sources).toBeTruthy()
     expect(body.marketInventory).toHaveLength(6)

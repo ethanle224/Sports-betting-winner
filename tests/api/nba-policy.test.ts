@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { applyNbaSelectionPolicy, applyNbaPlayerSelectionPolicy, NBA_SELECTION_POLICY, NBA_PLAYER_SELECTION_POLICY } from '../../server/nba-policy'
+import { applyNbaSelectionPolicy, applyNbaPlayerSelectionPolicy, compareNbaPlayerMarkets, NBA_SELECTION_POLICY, NBA_PLAYER_SELECTION_POLICY } from '../../server/nba-policy'
 import type { NbaPlayerTotalsResult } from '../../server/nba-player-totals'
 
 const simulation = (): NbaPlayerTotalsResult => ({ version: 'nba-player-totals-v2', status: 'estimated', eligibleForPrimary: true,
@@ -43,6 +43,37 @@ it('v2 uses ticker then YES-before-NO as stable gap-tie order and never forces a
   const b = { ...a, ticker: 'B' }
   expect(applyNbaPlayerSelectionPolicy([b, a], simulation()).studySide?.ticker).toBe('A')
   expect(applyNbaPlayerSelectionPolicy([{ ...a, line: 230.5 }], simulation()).studySide).toBeNull()
+})
+it('shadow-compares supported ML, spread, and total on the same executable quote with paired scores', () => {
+  const markets = [
+    { ticker: 'ML', kind: 'moneyline', team: 'home', rules_primary: 'Exact contract rules', rules_secondary: 'Resolution rules' },
+    { ticker: 'SP', kind: 'spread', team: 'away', line: 3.5, rules_primary: 'Exact contract rules', rules_secondary: 'Resolution rules' },
+    { ticker: 'TOT', kind: 'total', line: 229.5, rules_primary: 'Exact contract rules', rules_secondary: 'Resolution rules' },
+  ] as const
+  const candidates = markets.flatMap((m) => ['yes', 'no'].map((contractSide) => ({
+    ...side, ticker: m.ticker, market: m.kind, side: contractSide, line: 'line' in m ? m.line : null,
+  })))
+  const before = JSON.stringify(candidates)
+  const result = compareNbaPlayerMarkets(candidates, markets, simulation())
+  expect(result).toMatchObject({ status: 'SHADOW_ONLY', eligibleForPrimary: false, pricedSides: 6 })
+  expect(result.candidates.map((c) => [c.ticker, c.side, c.probability])).toEqual([
+    ['ML', 'yes', 1], ['SP', 'no', 1], ['TOT', 'yes', 1],
+    ['ML', 'no', 0], ['SP', 'yes', 0], ['TOT', 'no', 0],
+  ])
+  expect(JSON.stringify(candidates)).toBe(before)
+})
+it('shadow fails closed on missing mapping, invalid books/rules, ties, malformed draws and unavailable simulation', () => {
+  const markets = [{ ticker: 'ML', kind: 'moneyline' as const, team: 'home' as const,
+    rules_primary: 'Exact contract rules', rules_secondary: 'Resolution rules' }]
+  const candidate = { ...side, ticker: 'ML', market: 'moneyline' as const, line: null }
+  expect(compareNbaPlayerMarkets([candidate], markets, simulation()).candidates).toHaveLength(1)
+  for (const bad of [{ ...candidate, ticker: 'UNKNOWN' }, { ...candidate, allInCost: .1 },
+    { ...candidate, rules: '' }, { ...candidate, side: 'maybe' }, { ...candidate, line: 3.5 }]) {
+    expect(compareNbaPlayerMarkets([bad], markets, simulation()).candidates).toEqual([])
+  }
+  expect(compareNbaPlayerMarkets([candidate], [{ ...markets[0], team: undefined }], simulation()).candidates).toEqual([])
+  expect(compareNbaPlayerMarkets([candidate], markets, { ...simulation(), scores: Array(1000).fill({ home: 110, away: 110, overtimePeriods: 0 }) }).candidates).toEqual([])
+  expect(compareNbaPlayerMarkets([candidate], markets, null).candidates).toEqual([])
 })
 import { pricedNbaSide, type NbaPricedCandidate } from '../../server/nba-kalshi'
 

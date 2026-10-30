@@ -42,6 +42,16 @@ export type NbaMarket = { ticker: string; event_ticker: string; title: string; r
 export type NbaBook = { orderbook_fp?: { yes_dollars?: unknown; no_dollars?: unknown } }
 const numeric = (v: unknown, max: number) => typeof v === 'string' && v.trim() !== '' && Number.isFinite(Number(v)) && Number(v) >= 0 && Number(v) <= max ? Number(v) : null
 
+// Complete raw book evidence for the all-market policy. Empty arrays are known
+// illiquidity, unlike an absent/malformed side. Legacy pricing stays unchanged.
+export function isNbaBook(value: unknown): value is NbaBook {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+  const fp = (value as NbaBook).orderbook_fp
+  return [fp?.yes_dollars, fp?.no_dollars].every((levels) => Array.isArray(levels) &&
+    Array.from(levels).every((row) => Array.isArray(row) && row.length === 2 &&
+      numeric(row[0], 1) !== null && numeric(row[1], 1e9) !== null && Number(row[1]) > 0))
+}
+
 function classify(raw: Record<string, unknown>, series: NbaSeries, game: OpeningNbaGame): NbaMarket | null {
   const [year, month, day] = game.date.split('-').map(Number)
   const event = `${series}-${String(year).slice(2)}${new Date(Date.UTC(year, month - 1, day)).toLocaleString('en-US', { month: 'short', timeZone: 'UTC' }).toUpperCase()}${String(day).padStart(2, '0')}${game.eventCode}`
@@ -68,6 +78,21 @@ function classify(raw: Record<string, unknown>, series: NbaSeries, game: Opening
     if (match && Number(match[1]) >= 100 && Number(match[1]) <= 400) return { ...base, kind: 'total', line: Number(match[1]) }
   }
   return null
+}
+
+// Reclassify frozen raw metadata rather than trusting submitted team/line flags.
+// This does not fetch or amend a historical record.
+export function validateNbaMarketForGame(market: NbaMarket,
+  game: { gameId: string; home: string; away: string; date: string }): boolean {
+  if (!market || !market.raw || typeof market.raw !== 'object' || !SERIES.includes(market.series) ||
+    market.gameId !== game.gameId || typeof market.event_ticker !== 'string' || !/^20\d\d-\d\d-\d\d$/.test(game.date)) return false
+  const codes = /([A-Z]{3})([A-Z]{3})$/.exec(market.event_ticker)
+  if (!codes) return false
+  const parsed = classify(market.raw, market.series, { gameId: game.gameId, date: game.date,
+    awayCity: game.away, homeCity: game.home, awayCode: codes[1], homeCode: codes[2],
+    eventCode: codes[1] + codes[2], awayId: 'away', homeId: 'home' })
+  return !!parsed && (['ticker', 'event_ticker', 'title', 'rules_primary', 'rules_secondary', 'gameId', 'series', 'kind', 'team', 'line'] as const)
+    .every((key) => parsed[key] === market[key])
 }
 
 export async function collectOpeningNbaMarkets(date: string, games: OpeningNbaGame[], fetcher: typeof fetch = fetch) {

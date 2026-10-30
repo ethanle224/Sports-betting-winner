@@ -55,13 +55,17 @@ function FactorChecks({ game }: { game: NbaScanGame }) {
 
 function PlayerTotalsShadow({ game }: { game: NbaScanGame }) {
   if (!game.playerTotals) return null
-  const active = game.selectionPolicy === 'nba-primary-v4-player-totals-v2'
-  const { simulation, comparison } = game.playerTotals
+  const crossMarket = game.selectionPolicy === 'nba-primary-v5-player-markets-v2'
+  const active = crossMarket || game.selectionPolicy === 'nba-primary-v4-player-totals-v2'
+  const { simulation, comparison, crossMarketShadow } = game.playerTotals
   const summary = summarizeNbaSimulation(simulation)
-  const highestProbability = [...comparison.candidates].filter((side) => Number.isFinite(side.probability) &&
+  const ranked = crossMarket ? [...(game.candidates ?? [])].sort((a, b) =>
+    b.estimatedNetEdge - a.estimatedNetEdge || (a.ticker < b.ticker ? -1 : a.ticker > b.ticker ? 1 : 0) ||
+    (a.side === b.side ? 0 : a.side === 'yes' ? -1 : 1)) : comparison.candidates
+  const highestProbability = [...ranked].filter((side) => Number.isFinite(side.probability) &&
     side.probability >= 0 && side.probability <= 1).sort((a, b) => b.probability - a.probability ||
       b.estimatedNetEdge - a.estimatedNetEdge || a.ticker.localeCompare(b.ticker) || a.side.localeCompare(b.side))[0]
-  return <details className="nba-factor-details"><summary>{active ? 'Player Simulation v2 · main paper model' : 'Player totals · shadow only'}</summary>
+  return <details className="nba-factor-details"><summary>{crossMarket ? 'Player Simulation v2 · cross-market main paper model (v5)' : active ? 'Player Simulation v2 · main paper model' : 'Player totals · shadow only'}</summary>
     {simulation.version && <p><code>{simulation.version}</code> · {active ? 'Active paper selector; unvalidated, not a qualified betting edge.' : 'Pregame research, not a validated replacement model.'}</p>}
     {simulation.status === 'estimated' ? <>
       <p>{simulation.simulations.toLocaleString('en-US')} simulations · mean total {simulation.expectedTotal?.toFixed(1)} · simulated SD {simulation.totalSd?.toFixed(1)}. Uncalibrated recent-rotation model, not a verified lineup forecast.</p>
@@ -84,13 +88,29 @@ function PlayerTotalsShadow({ game }: { game: NbaScanGame }) {
         </details>
       </>}
       <p className="help">Monte Carlo noise alone can be about ±3.1 percentage points near 50%; real model and roster uncertainty is larger. Highest probability and largest estimated cost gap are different rankings.</p>
-      {highestProbability && <p>Highest simulated chance on inspected totals: {nbaSideLabel(highestProbability, game)} · {(highestProbability.probability * 100).toFixed(1)}%. A higher hit rate can still offer worse value or lose money after costs.</p>}
+      {highestProbability && <p>{crossMarket ? 'Highest simulated chance on all quoted YES/NO sides:' : 'Highest simulated chance on inspected totals:'} {nbaSideLabel(highestProbability, game)} · {(highestProbability.probability * 100).toFixed(1)}%. A higher hit rate can still offer worse value or lose money after costs.</p>}
       {active ? game.studySide ? <p>Main v2 paper choice: <strong>{nbaSideLabel(game.studySide, game)}</strong> · v2 simulation chance {(game.studySide.probability * 100).toFixed(1)}%. Experimental, not a calibrated win rate.</p> : <p>No eligible positive-gap v2 paper choice. No fallback to the old model.</p> : comparison.studySide ? <p>Top positive-gap shadow: <strong>{nbaSideLabel(comparison.studySide, game)}</strong> · {(comparison.studySide.probability * 100).toFixed(1)}% simulated chance. Not promoted to a pick.</p> : <p>No positive-gap player shadow on the observed quotes.</p>}
+      {crossMarket && <p><strong>Old totals-only comparator · not the v5 choice</strong></p>}
       {comparison.candidates.length > 0 && <div className="table-wrap"><table aria-label="Same-quote total estimates"><thead><tr><th>GAP RANK</th><th>TOTAL</th><th>BASELINE %</th><th>PLAYER %</th><th>ALL-IN ¢</th><th>GAP pp</th></tr></thead><tbody>
         {comparison.candidates.map((side, index) => { const baseline = comparison.baselineCandidates.find((item) => item.ticker === side.ticker && item.side === side.side)
           return <tr key={`${side.ticker}:${side.side}`}><td>{index + 1}</td><td>{nbaSideLabel(side, game)}</td><td>{baseline ? (baseline.probability * 100).toFixed(1) : 'unknown'}</td><td>{(side.probability * 100).toFixed(1)}</td><td>{(side.allInCost * 100).toFixed(2)}</td><td>{(side.estimatedNetEdge * 100).toFixed(2)}</td></tr> })}
       </tbody></table></div>}
+      {!crossMarket && crossMarketShadow && <>
+        <p>Cross-market v2 shadow: {crossMarketShadow.candidates.length} valid priced sides checked on the observed books ({crossMarketShadow.inspected.mappedQuotes} mapped quotes). This is a bounded inspected subset, not every listed contract. Moneyline and spread chances come from paired scores, not validated calibration; <strong>they cannot become primary picks yet</strong>. Unsupported, missing, or unquoted contracts are excluded, not estimated.</p>
+        {crossMarketShadow.studySide ? <p>Top experimental cross-market gap: {nbaSideLabel(crossMarketShadow.studySide, game)} · {(crossMarketShadow.studySide.probability * 100).toFixed(1)}% simulated chance · {(crossMarketShadow.studySide.estimatedNetEdge * 100).toFixed(2)} pp after estimated costs. Shadow only.</p> : <p>No positive-gap cross-market shadow on the valid observed quotes.</p>}
+        {crossMarketShadow.candidates.length > 0 && <div className="table-wrap"><table aria-label="Same-quote cross-market simulation estimates"><thead><tr><th>RANK</th><th>CONTRACT</th><th>MARKET</th><th>PLAYER %</th><th>ALL-IN ¢</th><th>GAP pp</th></tr></thead><tbody>
+          {crossMarketShadow.candidates.map((side, index) => <tr key={`${side.ticker}:${side.side}`}><td>{index + 1}</td><td>{nbaSideLabel(side, game)}</td><td>{side.market}</td><td>{(side.probability * 100).toFixed(1)}</td><td>{(side.allInCost * 100).toFixed(2)}</td><td>{(side.estimatedNetEdge * 100).toFixed(2)}</td></tr>)}
+        </tbody></table></div>}
+      </>}
     </> : <p>{simulation.reason ?? 'Player inputs unavailable; no simulation estimate.'}</p>}
+    {crossMarket && <>
+      <p>UNCALIBRATED paper experiment · user-approved paper only. Market-specific chances are estimated from paired scores, not calibrated odds. Rank all quoted YES/NO sides by estimated net gap descending; ticker ASCII ascending; YES before NO. No old-model fallback.</p>
+      {!game.studySide && <p>V5 paper abstention: {game.abstentionReason ?? game.playerTotals.marketComparison?.abstentionReason ?? simulation.reason ?? 'No eligible positive estimated net gap on supported quotes.'} No old-model fallback.</p>}
+      {game.marketInspection ? <p>All supported open markets inspected: {game.marketInspection.inspected} of {game.marketInspection.listed} listed · {game.marketInspection.complete ? 'complete' : 'incomplete'}. Unsupported props, halves and integer/push contracts are excluded.</p> : <p>Complete supported-market inspection evidence unavailable.</p>}
+      {ranked.length ? <div className="table-wrap"><table aria-label="V5 cross-market paper ranking"><thead><tr><th>GAP RANK</th><th>CONTRACT</th><th>SIDE</th><th>MARKET</th><th>UNCALIBRATED %</th><th>FEE ¢</th><th>ALL-IN ¢</th><th>GAP pp</th></tr></thead><tbody>
+        {ranked.map((side, index) => <tr key={`${side.ticker}:${side.side}`}><td>{index + 1}</td><td>{nbaSideLabel(side, game)} <code>{side.ticker}</code></td><td>{side.side.toUpperCase()}</td><td>{side.market}</td><td>{(side.probability * 100).toFixed(1)}</td><td>{(side.feeEstimate / 10 * 100).toFixed(2)}</td><td>{(side.allInCost * 100).toFixed(2)}</td><td>{(side.estimatedNetEdge * 100).toFixed(2)}</td></tr>)}
+      </tbody></table></div> : <p>No eligible quoted YES/NO sides across supported moneyline, spread and total markets. No fabricated prices or forced choice.</p>}
+    </>}
     <ul>{[...simulation.assumptions, ...simulation.unknowns].map((detail) => <li key={detail}>{detail}</li>)}</ul>
     {simulation.sources.map((source, index) => <span key={source}><a href={source} target="_blank" rel="noreferrer">Box score {index + 1}</a>{' '}</span>)}
     <p className="help">{active ? 'v2 chooses at most one main paper pick per game. The old score-only model is frozen separately for comparison. No real orders.' : 'Research comparison only. No extra tracker pick and no change to the primary selection.'}</p>
@@ -98,14 +118,15 @@ function PlayerTotalsShadow({ game }: { game: NbaScanGame }) {
 }
 
 function PricedOption({ side, game, leading = false, model }: { side: NbaStudySide; game: NbaScanGame; leading?: boolean; model?: 'baseline' | 'v2' }) {
-  const playerModel = model ? model === 'v2' : game.selectionPolicy === 'nba-primary-v4-player-totals-v2'
+  const crossMarket = game.selectionPolicy === 'nba-primary-v5-player-markets-v2' && model !== 'baseline'
+  const playerModel = model ? model === 'v2' : crossMarket || game.selectionPolicy === 'nba-primary-v4-player-totals-v2'
   return <div className="nba-priced-option"><strong>{nbaSideLabel(side, game)}</strong> <span className="nba-option-status">{leading ? 'TOP STUDY · ' : ''}NOT QUALIFIED</span>
     {leading && <p className="nba-pick-economics">1u paper stake · all-in {(side.allInCost * 100).toFixed(2)}¢ · win {side.allInCost > 0 ? `+${(1 / side.allInCost - 1).toFixed(2)}u` : 'unavailable'} · loss −1u</p>}
     <details><summary>Reasoning &amp; risks — {nbaSideLabel(side, game)}</summary>
       <p><code>{side.ticker}</code> · {side.side.toUpperCase()} · {side.market} · 10 paper contracts</p>
       <p>{playerModel ? 'Player Simulation v2' : 'Score-only model'} {(side.probability * 100).toFixed(1)}% · sized quote {(side.price * 100).toFixed(1)}¢ + estimated fee {(side.feeEstimate / 10 * 100).toFixed(2)}¢ per contract · all-in {(side.allInCost * 100).toFixed(2)}¢ · model–cost gap {(side.estimatedNetEdge * 100).toFixed(2)} pp.</p>
       {side.market === 'total' && <p>Pregame sportsbook total: {game.totalBenchmark?.reference ?? 'unavailable'} ({game.totalBenchmark?.provider ?? 'unknown provider'}). {game.totalBenchmark?.reason ?? 'No independent comparison captured.'}</p>}
-      <p>Ranked by {playerModel ? 'v2 simulation' : 'score-only'} probability minus estimated all-in cost at this scan, with a limited nearby-total comparison when a sportsbook reference exists. Neither a positive model–cost gap nor a closer total proves a safer or profitable pick. This side pays $1 only if its exact {side.side.toUpperCase()} contract outcome occurs; displayed book depth is not a fill.</p>
+      <p>Ranked by {crossMarket ? 'v5 simulation probability minus estimated all-in cost across all quoted YES/NO sides (uncalibrated; moneyline, spread and total).' : `${playerModel ? 'v2 simulation' : 'score-only'} probability minus estimated all-in cost at this scan, with a limited nearby-total comparison when a sportsbook reference exists.`} Neither a positive model–cost gap nor a closer total proves a safer or profitable pick. This side pays $1 only if its exact {side.side.toUpperCase()} contract outcome occurs; displayed book depth is not a fill.</p>
       <p>Current injuries and lineup, historical team context, rules, fees and book checks have separate sourced statuses under Evidence &amp; gaps. A displayed quote cannot prove a fill. Fair-price settlement can differ from binary results. Rerun the scan before tip.</p>
       <p>Exact rule: {side.rules}</p><p>{side.rulesSecondary}</p>
     </details></div>
@@ -214,7 +235,7 @@ export default function NbaResearch({ onLogout }: { onLogout: () => Promise<void
     <section className="board nba-paper-workspace" aria-label="NBA slate study checklist"><p className="eyebrow">01 / NBA PAPER DESK</p><h2>Scan slate &amp; track results</h2>
       {nbaView === 'scan' && <>
       <p className="help">Scan, pick a side, tap Track. Each confirmed click saves one pending 1u paper study to the signed-in cloud ledger. Old browser records are migrated without deleting them. Not a qualified edge or real order.</p>
-      <p className="help">New scans use Player Simulation v2 as the main paper selector: 1,000 simulated games, at most one positive-estimated-gap total per game, no old-model fallback. The old score-only selection stays frozen for comparison.</p>
+      <p className="help">New scans use Player Simulation v2 under cross-market policy v5 as the main paper selector: 1,000 paired simulated games, at most one positive-estimated-gap moneyline, spread or total per game, no old-model fallback. Experimental paper estimates, not live trading. The old score-only selection stays frozen for comparison.</p>
       <div className="scan-controls"><label>Scan game date<input type="date" min="2026-10-20" max="2027-04-11" value={date} onChange={(event) => changeDate(event.target.value)} /></label>
         <button type="button" disabled={scanBusy || !date} onClick={() => void scanSlate()}>{scanBusy ? 'Scanning Kalshi…' : 'Scan slate'}</button></div>
       {scanError && <><p role="alert">{scanError}</p>{scanError.startsWith('Session expired.') &&
@@ -223,8 +244,8 @@ export default function NbaResearch({ onLogout }: { onLogout: () => Promise<void
       {study && study.date === date && <><p className="help">{study.date} slate · observed {new Date(study.observedAt).toLocaleString()} · current-season final scores in history: {study.currentSeasonFinals ?? 'unknown'} · 10 whole contracts per inspected side · quotes may change before tip. <a href={study.sources.markets} target="_blank" rel="noreferrer">Kalshi public markets</a> · <a href={study.sources.feeSchedule} target="_blank" rel="noreferrer">fee schedule</a></p>
         {!study.games.length && <p className="help">No regular-season NBA games on this date. No paper choices.</p>}
         <div className="nba-study-grid">{study.games.map((item) => <article key={item.gameId} className="nba-study-card"><h3>{item.away} @ {item.home}</h3>
-          {item.studySide ? <><p><strong>{item.selectionPolicy === 'nba-primary-v4-player-totals-v2' ? 'Player Simulation v2 · main paper pick · not a qualified bet' : 'Study side · not a qualified bet'}</strong></p><PricedOption side={item.studySide} game={item} leading />
-            {item.shadowSide && <p className="help">Shadow comparison · {nbaSideLabel(item.shadowSide, item)} · model {(item.shadowSide.probability * 100).toFixed(1)}% · all-in {(item.shadowSide.allInCost * 100).toFixed(2)}¢ · simulated win {`+${(1 / item.shadowSide.allInCost - 1).toFixed(2)}u`} / loss −1u. Research only: not tracked as an extra pick. Near-market spreads require a sourced sportsbook reference; at least 1.7× gross payout, 55% experimental model chance and 3pp estimated gap. Top study, including totals, is unchanged.</p>}
+          {item.studySide ? <><p><strong>{['nba-primary-v4-player-totals-v2', 'nba-primary-v5-player-markets-v2'].includes(item.selectionPolicy ?? '') ? 'Player Simulation v2 · main paper pick · not a qualified bet' : 'Study side · not a qualified bet'}</strong></p><PricedOption side={item.studySide} game={item} leading />
+            {item.selectionPolicy !== 'nba-primary-v5-player-markets-v2' && item.shadowSide && <p className="help">Shadow comparison · {nbaSideLabel(item.shadowSide, item)} · model {(item.shadowSide.probability * 100).toFixed(1)}% · all-in {(item.shadowSide.allInCost * 100).toFixed(2)}¢ · simulated win {`+${(1 / item.shadowSide.allInCost - 1).toFixed(2)}u`} / loss −1u. Research only: not tracked as an extra pick. Near-market spreads require a sourced sportsbook reference; at least 1.7× gross payout, 55% experimental model chance and 3pp estimated gap. Top study, including totals, is unchanged.</p>}
             {item.pregameLine && <p className="help">Independent {item.pregameLine.provider} pregame reference: {item.home} {item.pregameLine.homeSpread > 0 ? '+' : ''}{item.pregameLine.homeSpread} · total {item.pregameLine.total ?? 'unavailable'} · <a href={item.pregameLine.source} target="_blank" rel="noreferrer">observed {new Date(item.pregameLine.observedAt).toLocaleString()}</a>. Not the selected Kalshi contract.</p>}
             <button className="nba-add-paper" type="button" disabled={!cloud || tracked.includes(item.gameId) || trackingId === item.gameId} onClick={() => void trackPick(item.gameId)}>
               {tracked.includes(item.gameId) ? `${nbaSideLabel(item.studySide, item)} tracked · see history` : trackingId === item.gameId ? 'Saving paper pick…' : `Track ${nbaSideLabel(item.studySide, item)} as paper pick · 1u`}
@@ -233,11 +254,11 @@ export default function NbaResearch({ onLogout }: { onLogout: () => Promise<void
               {(item.candidates ?? []).filter((candidate) => candidate.ticker !== item.studySide?.ticker || candidate.side !== item.studySide?.side).map((candidate) =>
                 <PricedOption key={`${candidate.ticker}:${candidate.side}`} side={candidate} game={item} />)}</details></> : <>
             <p>{item.abstentionReason ?? 'No sized book/model comparison available. No study side invented.'}</p>
-            {item.selectionPolicy !== 'nba-primary-v4-player-totals-v2' && item.baselineStudySide && <details><summary>Baseline comparison · research only, not a primary pick</summary>
+            {!['nba-primary-v4-player-totals-v2', 'nba-primary-v5-player-markets-v2'].includes(item.selectionPolicy ?? '') && item.baselineStudySide && <details><summary>Baseline comparison · research only, not a primary pick</summary>
               <PricedOption side={item.baselineStudySide} game={item} />
               <p className="help">Retained for same-time evaluation. No replacement total or reversed side is invented.</p></details>}
           </>}
-          {item.selectionPolicy === 'nba-primary-v4-player-totals-v2' && item.baselineStudySide && <details className="nba-factor-details"><summary>Old score-only model · frozen comparison</summary>
+          {['nba-primary-v4-player-totals-v2', 'nba-primary-v5-player-markets-v2'].includes(item.selectionPolicy ?? '') && item.baselineStudySide && <details className="nba-factor-details"><summary>Old score-only model · frozen comparison</summary>
             <PricedOption side={item.baselineStudySide} game={item} model="baseline" />
             <p>Retained with the same scan and quotes for comparison only. This does not choose the main pick or create a second tracked paper pick. Historical records are unchanged.</p>
           </details>}
@@ -245,7 +266,7 @@ export default function NbaResearch({ onLogout }: { onLogout: () => Promise<void
           <FactorChecks game={item} />
           <details className="nba-market-checks"><summary>Market coverage &amp; missing checks</summary>
           <p>Listed full-game contracts — ML: {item.coverage.moneyline} · Spread: {item.coverage.spread} · Total: {item.coverage.total}. {item.coverage.spread === 0 || item.coverage.total === 0 ? 'Missing market families are not simulated.' : ''}</p>
-          <p className="help">{item.candidates?.length ?? (item.studySide ? 1 : 0)} priced options inspected from selected lines · listed contracts are not all priced or qualified.</p>
+          <p className="help">{item.candidates?.length ?? (item.studySide ? 1 : 0)} {item.selectionPolicy === 'nba-primary-v5-player-markets-v2' ? 'priced options ranked from all supported open markets · unsupported or unquoted sides are excluded; no side is qualified.' : 'priced options inspected from selected lines · listed contracts are not all priced or qualified.'}</p>
           <p>Game mapped: {item.checklist?.mappedGame ? 'verified against schedule' : 'unverified'}. Rest, travel and current-roster continuity remain unmodeled. Open Evidence &amp; gaps for each sourced status.</p></details>
         </article>)}</div></>}
       </>}

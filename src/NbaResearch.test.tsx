@@ -54,6 +54,75 @@ const pricedScan = { ...scan, games: scan.games.map((item, index) => {
 describe('October 20 NBA Kalshi checklist', () => {
   beforeEach(() => { cloudStore.freezes = []; vi.useFakeTimers({ shouldAdvanceTime: true }); vi.setSystemTime(new Date('2026-10-19T12:00:00-07:00')) })
   afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); localStorage.clear() })
+  it('makes the v5 cross-market ranking primary without presenting the old total comparator as its choice', async () => {
+    const oldTotal = pricedScan.games[1].studySide
+    const chosen = { ...pricedScan.games[0].studySide, probability: .70, estimatedNetEdge: .1725 }
+    const ml = { ...scan.games[0].studySide, probability: .80, estimatedNetEdge: .15 }
+    const scores = Array.from({ length: 1000 }, () => ({ home: 110, away: 100, overtimePeriods: 0 }))
+    const active = { ...scan, games: [{ ...pricedScan.games[0], selectionPolicy: 'nba-primary-v5-player-markets-v2',
+      marketInspection: { mode: 'ALL_SUPPORTED_OPEN_MARKETS', listed: 3, inspected: 3, complete: true },
+      coverage: { moneyline: 1, spread: 1, total: 1 }, baselineStudySide: oldTotal,
+      studySide: chosen, candidates: [chosen, ml, oldTotal], playerTotals: {
+        simulation: { version: 'nba-player-totals-v2', status: 'estimated', simulations: 1000,
+          scores, totals: scores.map((s) => s.home + s.away), expectedTotal: 210, totalSd: 0,
+          inputs: null, assumptions: [], unknowns: [], sources: [] },
+        comparison: { status: 'PAPER_ONLY_EXPERIMENT', studySide: oldTotal, candidates: [oldTotal],
+          baselineCandidates: [oldTotal], baselineStudySide: oldTotal },
+        marketComparison: { selectionPolicy: 'nba-primary-v5-player-markets-v2', candidates: [chosen, ml, oldTotal],
+          studySide: chosen, abstentionReason: null, status: 'PAPER_ONLY_EXPERIMENT',
+          promotionGate: 'USER_APPROVED_PAPER_ONLY', rankingRule: 'net gap descending; ticker ASCII ascending; YES before NO' },
+        crossMarketShadow: { candidates: [ml], studySide: ml, inspected: { mappedQuotes: 1 } },
+      } }] }
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => ({ ok: true,
+      json: async () => String(url).includes('nba-scan') ? active : research }) as Response)
+    render(<NbaResearch onLogout={vi.fn()} />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Scan slate' }))
+    expect(await screen.findByText('Player Simulation v2 · cross-market main paper model (v5)')).toBeInTheDocument()
+    const table = screen.getByRole('table', { name: 'V5 cross-market paper ranking' })
+    const rows = within(table).getAllByRole('row')
+    expect(rows).toHaveLength(4)
+    expect(rows[1]).toHaveTextContent('Detroit +1.5')
+    expect(rows[2]).toHaveTextContent('moneyline')
+    expect(rows[3]).toHaveTextContent('total')
+    expect(within(table).getByRole('columnheader', { name: 'UNCALIBRATED %' })).toBeInTheDocument()
+    expect(within(table).getByRole('columnheader', { name: 'FEE ¢' })).toBeInTheDocument()
+    expect(screen.getByText(/Highest simulated chance on all quoted YES\/NO sides:/)).toHaveTextContent('80.0%')
+    expect(screen.getByText(/All supported open markets inspected: 3 of 3/)).toBeInTheDocument()
+    expect(screen.getByText(/3 priced options ranked from all supported open markets/)).toBeInTheDocument()
+    expect(screen.queryByText(/priced options inspected from selected lines/)).not.toBeInTheDocument()
+    expect(screen.getByText('Old totals-only comparator · not the v5 choice')).toBeInTheDocument()
+    expect(screen.getByText('Old score-only model · frozen comparison')).toBeInTheDocument()
+    expect(screen.getAllByText(/v5 simulation probability minus estimated all-in cost across all quoted YES\/NO sides/)[0]).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Track Detroit +1.5 as paper pick · 1u' })).toBeInTheDocument()
+    expect(screen.getAllByRole('button', { name: /Track .* as paper pick/ })).toHaveLength(1)
+    expect(screen.queryByText(/Top positive-gap shadow|cannot become primary picks yet|Cross-market v2 shadow/)).not.toBeInTheDocument()
+    expect(screen.getAllByText(/v5 simulation probability minus estimated all-in cost across all quoted YES\/NO sides/)[0]).not.toHaveTextContent('limited nearby-total comparison')
+  })
+  it.each(['unknown', 'no-gap'] as const)('shows a v5 %s abstention without reverting to a totals-only choice', async (mode) => {
+    const oldTotal = pricedScan.games[1].studySide
+    const candidates = mode === 'unknown' ? [] : [{ ...oldTotal, probability: .2, estimatedNetEdge: -.2371 }]
+    const reason = mode === 'unknown' ? 'Missing reconciled player inputs and quoted markets.' : 'No positive estimated net gap on supported quotes.'
+    const active = { ...scan, games: [{ ...pricedScan.games[0], selectionPolicy: 'nba-primary-v5-player-markets-v2',
+      studySide: null, candidates, abstentionReason: reason, baselineStudySide: oldTotal,
+      marketInspection: { mode: 'ALL_SUPPORTED_OPEN_MARKETS', listed: 0, inspected: 0, complete: true },
+      playerTotals: { simulation: { version: 'nba-player-totals-v2', status: mode === 'unknown' ? 'unknown' : 'estimated',
+        reason: mode === 'unknown' ? reason : null, simulations: mode === 'unknown' ? 0 : 1000,
+        totals: [], scores: [], expectedTotal: null, totalSd: null, inputs: null, assumptions: [], unknowns: [], sources: [] },
+        comparison: { studySide: oldTotal, candidates: [oldTotal], baselineCandidates: [oldTotal] },
+        marketComparison: { selectionPolicy: 'nba-primary-v5-player-markets-v2', studySide: null, candidates,
+          abstentionReason: reason, status: 'PAPER_ONLY_EXPERIMENT', promotionGate: 'USER_APPROVED_PAPER_ONLY',
+          rankingRule: 'net gap descending; ticker ASCII ascending; YES before NO' } } }] }
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => ({ ok: true,
+      json: async () => String(url).includes('nba-scan') ? active : research }) as Response)
+    render(<NbaResearch onLogout={vi.fn()} />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Scan slate' }))
+    expect(await screen.findByText(/V5 paper abstention:/)).toHaveTextContent(reason)
+    expect(screen.queryByRole('button', { name: /Track .* as paper pick/ })).not.toBeInTheDocument()
+    expect(screen.getByText(/All supported open markets inspected: 0 of 0/)).toBeInTheDocument()
+    if (mode === 'unknown') expect(screen.getByText(/No eligible quoted YES\/NO sides across supported/)).toBeInTheDocument()
+    else expect(screen.getByRole('table', { name: 'V5 cross-market paper ranking' })).toHaveTextContent('-23.71')
+    expect(screen.queryByText(/Top positive-gap shadow|No positive-gap player shadow/)).not.toBeInTheDocument()
+  })
   it('labels v2 as the main paper selector and shows the old model separately without a second track control', async () => {
     const baseline = pricedScan.games[1].studySide
     const chosen = { ...baseline, probability: 1, estimatedNetEdge: 1 - baseline.allInCost }

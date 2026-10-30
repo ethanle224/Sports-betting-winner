@@ -4,7 +4,7 @@ import NbaHistoryBoard from './NbaHistoryBoard'
 
 it('labels frozen model versions without relabeling old picks as v2', () => {
   // Presentation fixtures only; no quotes, settlement or model evidence is fetched.
-  const entries = ['nba-primary-v4-player-totals-v2', 'nba-primary-v3-sides-paused'].map((selectionPolicy, i) => {
+  const entries = ['nba-primary-v4-player-totals-v2', 'nba-primary-v3-sides-paused', 'nba-primary-v5-player-markets-v2'].map((selectionPolicy, i) => {
     const gameId = `g${i}`
     const selected = { ticker: `TOTAL-${i}`, market: 'total', side: 'no', line: 228.5,
       probability: .6, price: .5, feeEstimate: 0, allInCost: .5, estimatedNetEdge: .1,
@@ -19,5 +19,8 @@ it('labels frozen model versions without relabeling old picks as v2', () => {
   const second = screen.getByText('Old score-only / legacy').closest('tr')!
   expect(within(first).getByText('Pending')).toBeInTheDocument()
   expect(within(second).getByText('Pending')).toBeInTheDocument()
-  expect(screen.getAllByRole('row')).toHaveLength(3)
+  const crossMarket = screen.getByText('Player Simulation v2 · v5 cross-market').closest('tr')!
+  expect(within(crossMarket).getByText('Pending')).toBeInTheDocument()
+  expect(within(crossMarket).queryByText('Old score-only / legacy')).not.toBeInTheDocument()
+  expect(screen.getAllByRole('row')).toHaveLength(4)
 })

@@ -1,11 +1,12 @@
 import { verifySessionToken } from '../server/auth-core.js'
 import { createHash } from 'node:crypto'
-import { collectOpeningNbaMarkets, mapNbaSchedule, NBA_KALSHI_BASE, rankOpeningNbaGame, chooseNbaShadowSide, compareNbaPlayerTotals, type NbaBook, type NbaMarket } from '../server/nba-kalshi.js'
+import { collectOpeningNbaMarkets, mapNbaSchedule, NBA_KALSHI_BASE, rankOpeningNbaGame, chooseNbaShadowSide, compareNbaPlayerTotals, type NbaMarket } from '../server/nba-kalshi.js'
 import { collectNbaPlayerTotals, playerTotalChance, type NbaPlayerTotalsCache } from '../server/nba-player-totals.js'
 import { createNbaPlayerFetcher } from '../server/nba-player-fetch.js'
 import { collectNbaFactors, type NbaFactor } from '../server/nba-factors.js'
 import { collectNbaCurrentHistory } from '../server/nba-current-history.js'
-import { applyNbaSelectionPolicy, applyNbaPlayerSelectionPolicy } from '../server/nba-policy.js'
+import { applyNbaSelectionPolicy, applyNbaPlayerSelectionPolicy, applyNbaPlayerMarketsSelectionPolicy } from '../server/nba-policy.js'
+import { collectNbaMarketBooks } from '../server/nba-market-books.js'
 import { forecastNbaChallenger, NBA_CHALLENGER_CONFIG } from '../server/nba-challenger.js'
 import { loadNbaChallengerSnapshot } from '../server/nba-challenger-snapshot.js'
 import challengerSnapshot from '../server/data/nba-challenger-calibration.json' with { type: 'json' }
@@ -69,26 +70,11 @@ export default async function handler(request: Request, response: Response): Pro
     const playerFetcher = createNbaPlayerFetcher()
     const inventory = mappedGames.length ? await collectOpeningNbaMarkets(date, mappedGames) :
       { observedAt: new Date().toISOString(), source: NBA_KALSHI_BASE, series: [], markets: [] as NbaMarket[] }
-    // One shared queue for the entire slate prevents a many-game burst of public book reads.
-    let bookQueue = Promise.resolve()
-    const readBook = (ticker: string) => {
-      const task = bookQueue.then(async () => {
-        const url = `${NBA_KALSHI_BASE}/markets/${encodeURIComponent(ticker)}/orderbook`
-        for (let attempt = 0; attempt < 4; attempt++) {
-          await new Promise((resolve) => setTimeout(resolve, 120))
-          const upstream = await fetch(url, { signal: AbortSignal.timeout(10000) })
-          if (upstream.status === 429 && attempt < 3) {
-            await new Promise((resolve) => setTimeout(resolve, 500 * (attempt + 1)))
-            continue
-          }
-          if (!upstream.ok) throw new Error(`Orderbook unavailable: ${upstream.status} ${ticker}`)
-          return { book: await upstream.json() as NbaBook, observedAt: new Date().toISOString() }
-        }
-        throw new Error('Orderbook rate limited')
-      })
-      bookQueue = task.then(() => {}, () => {})
-      return task
-    }
+    // All supported open contracts, not the legacy nearest-line subset. A failed
+    // or expired collection returns no partial picks. Reads are public GET only.
+    const pregameIds = new Set(schedule.events.filter((event) => event.status?.type?.state === 'pre' &&
+      Date.parse(event.date ?? '') > Date.now()).map((event) => event.id))
+    const allBooks = await collectNbaMarketBooks(inventory.markets.filter((m) => pregameIds.has(m.gameId)).map((m) => m.ticker))
     const games = await Promise.all(mappedGames.map(async (mapped) => {
       const matching = schedule.events!.filter((item) => item.id === mapped.gameId)
       const event = matching[0]
@@ -116,26 +102,21 @@ export default async function handler(request: Request, response: Response): Pro
         !chosen.some((item) => item.ticker === market.ticker))
         .sort((a, b) => Math.abs((a.team === 'home' ? -1 : 1) * a.line! - pregameLine.homeSpread) -
           Math.abs((b.team === 'home' ? -1 : 1) * b.line! - pregameLine.homeSpread)).slice(0, 4)
-      const rawBooks: Record<string, NbaBook> = {}
-      const bookObservedAt: Record<string, string> = {}
-      await Promise.all(chosen.map(async (market) => {
-        const item = await readBook(market.ticker)
-        rawBooks[market.ticker] = item.book
-        bookObservedAt[market.ticker] = item.observedAt
-      }))
-      // Coverage includes all mapped inventory, not just the bounded orderbook subset.
-      const ranked = rankOpeningNbaGame(mapped, inventory.markets, rawBooks, forecast, quantity, beforeTip ? pregameLine : null)
-      await Promise.all(shadowExtra.map(async (market) => {
-        const item = await readBook(market.ticker)
-        rawBooks[market.ticker] = item.book
-        bookObservedAt[market.ticker] = item.observedAt
-      }))
-      const expanded = shadowExtra.length ? rankOpeningNbaGame(mapped, inventory.markets, rawBooks, forecast, quantity, pregameLine) : ranked
+      const gameMarkets = inventory.markets.filter((market) => market.gameId === mapped.gameId)
+      const inspectedMarkets = gameMarkets.filter((market) => Object.prototype.hasOwnProperty.call(allBooks.books, market.ticker))
+      const rawBooks = Object.fromEntries(inspectedMarkets.map((m) => [m.ticker, allBooks.books[m.ticker]]))
+      const bookObservedAt = allBooks.observedAt
+      // Keep the original score-only and totals-v4 comparisons on their original
+      // bounded quote subsets; new v5 selection alone sees every supported line.
+      const baselineBooks = Object.fromEntries(chosen.map((m) => [m.ticker, rawBooks[m.ticker]]))
+      const ranked = rankOpeningNbaGame(mapped, inventory.markets, baselineBooks, forecast, quantity, beforeTip ? pregameLine : null)
+      const expandedBooks = Object.fromEntries([...chosen, ...shadowExtra].map((m) => [m.ticker, rawBooks[m.ticker]]))
+      const expanded = shadowExtra.length ? rankOpeningNbaGame(mapped, inventory.markets, expandedBooks, forecast, quantity, pregameLine) : ranked
       // Compare side forecasts on exactly the same observed contract subset and quotes.
       // Extra reference-line reads never affect the frozen original baseline rank.
       const sideMarkets = inventory.markets.filter((market) => market.kind !== 'total')
-      const comparisonBaseline = rankOpeningNbaGame(mapped, sideMarkets, rawBooks, forecast, quantity, pregameLine)
-      const challengerRanking = challengerModel ? rankOpeningNbaGame(mapped, sideMarkets, rawBooks,
+      const comparisonBaseline = rankOpeningNbaGame(mapped, sideMarkets, expandedBooks, forecast, quantity, pregameLine)
+      const challengerRanking = challengerModel ? rankOpeningNbaGame(mapped, sideMarkets, expandedBooks,
         challengerModel.forecast, quantity, pregameLine) : null
       const challenger = challengerModel && challengerRanking ? { ...challengerModel, status: 'SHADOW_ONLY' as const,
         promotionGate: 'REJECTED_HISTORICAL_EVALUATION' as const,
@@ -149,13 +130,17 @@ export default async function handler(request: Request, response: Response): Pro
       const shotZones = await shotPromise
       const playerSimulation = playerPromise ? await playerPromise : null
       const legacySelection = applyNbaSelectionPolicy(ranked.studySide, quantity)
-      const policy = applyNbaPlayerSelectionPolicy(ranked.candidates, playerSimulation, quantity)
+      const totalsPolicy = applyNbaPlayerSelectionPolicy(ranked.candidates, playerSimulation, quantity)
+      const policy = applyNbaPlayerMarketsSelectionPolicy(gameMarkets,
+        beforeTip && Date.parse(event.date) > Date.now() ? rawBooks : {}, playerSimulation, quantity)
       const playerTotals = playerSimulation ? { simulation: playerSimulation,
         comparison: { ...compareNbaPlayerTotals(ranked.candidates, (kind, line) => playerTotalChance(playerSimulation, kind, line), 'main'),
           rankingRule: 'net gap descending; ticker ASCII ascending; YES before NO',
-          candidates: policy.candidates, studySide: policy.studySide,
+          candidates: totalsPolicy.candidates, studySide: totalsPolicy.studySide,
           baselineStudySide: ranked.studySide, baselinePolicyStudySide: legacySelection.studySide, legacySelection,
-          baselineShadowSide, baselineExpandedCandidates: [...ranked.candidates, ...extraCandidates] } } : null
+          baselineShadowSide, baselineExpandedCandidates: [...ranked.candidates, ...extraCandidates] },
+        marketComparison: { ...policy, status: 'PAPER_ONLY_EXPERIMENT' as const, promotionGate: 'USER_APPROVED_PAPER_ONLY' as const,
+          rankingRule: 'net gap descending; ticker ASCII ascending; YES before NO' } } : null
       const side = policy.studySide
       const matchingMarket = side && inventory.markets.find((market) => market.ticker === side.ticker && market.gameId === mapped.gameId)
       const observedAt = new Date().toISOString()
@@ -165,7 +150,7 @@ export default async function handler(request: Request, response: Response): Pro
       const factors = { ...context, shotZones,
         marketDisagreement: marginDifference !== null && pregameLine ? {
           status: 'estimated',
-          detail: `Model home margin ${forecast!.expectedMargin.toFixed(1)} vs ${pregameLine.provider} implied home margin ${(-pregameLine.homeSpread).toFixed(1)} (${marginDifference.toFixed(1)} points apart). ` +
+          detail: `Old score-only comparison home margin ${forecast!.expectedMargin.toFixed(1)} vs ${pregameLine.provider} implied home margin ${(-pregameLine.homeSpread).toFixed(1)} (${marginDifference.toFixed(1)} points apart). ` +
             `${marginDifference >= 7 ? 'MATERIAL DISAGREEMENT: roster and model inputs need human review; do not treat a cheap alternate spread as proof of value.' : 'This is a benchmark, not an injury/roster-adjusted projection.'}`,
           source: pregameLine.source, observedAt: pregameLine.observedAt } as NbaFactor : unknown('Independent sportsbook spread unavailable; model–market disagreement cannot be checked.'),
         venueH2H: { status: 'verified', detail: `Venue ${competition.neutralSite ? 'neutral' : mapped.homeCity + ' home'}; ${meetings.length} prior meetings in the score archive. Context only, zero extra model weight.`,
@@ -182,10 +167,12 @@ export default async function handler(request: Request, response: Response): Pro
       return { ...ranked, ...policy, shadowSide: null, challenger, playerTotals,
         baselineStudySide: ranked.studySide, baselinePolicyStudySide: legacySelection.studySide, legacySelection,
         pricedSides: policy.candidates.length,
+        marketInspection: { mode: 'ALL_SUPPORTED_OPEN_MARKETS' as const, listed: gameMarkets.length,
+          inspected: inspectedMarkets.length, complete: inspectedMarkets.length === gameMarkets.length },
         home: mapped.homeCity, away: mapped.awayCity, startsAt: event.date, forecast,
         pregameLine: beforeTip ? pregameLine : null,
         factors,
-        inspected: [...chosen, ...shadowExtra].map((m) => ({ ticker: m.ticker, source: `${NBA_KALSHI_BASE}/markets/${m.ticker}/orderbook`, book: rawBooks[m.ticker],
+        inspected: inspectedMarkets.map((m) => ({ ticker: m.ticker, source: `${NBA_KALSHI_BASE}/markets/${m.ticker}/orderbook`, book: rawBooks[m.ticker],
           observedAt: bookObservedAt[m.ticker] })) }
     }))
     response.status(200).json({ date, quantity, observedAt: new Date().toISOString(), marketObservedAt: inventory.observedAt,

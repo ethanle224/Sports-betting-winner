@@ -49,7 +49,7 @@ export default function NbaHistoryBoard({ entries, audits, notices, renderReview
           return <tr key={id} className={`nba-board-${outcome.toLowerCase().replace(' ', '-')}`}>
             <td><div className="nba-board-pick"><strong>{nbaSideLabel(decision.selected!, game)}</strong><span>{game.away} @ {game.home} · {decision.status === 'STUDY' ? 'Study, not qualified' : 'Paper experiment'}</span></div>
               <PickDetails entry={entry} audit={audit} renderReview={renderReview} />{notices[id] && <p className="nba-board-notice" role="status">{notices[id]}</p>}</td>
-            <td className="nba-board-reference">{game.selectionPolicy === 'nba-primary-v4-player-totals-v2' ? 'Player Simulation v2' : 'Old score-only / legacy'}</td>
+            <td className="nba-board-reference">{game.selectionPolicy === 'nba-primary-v5-player-markets-v2' ? 'Player Simulation v2 · v5 cross-market' : game.selectionPolicy === 'nba-primary-v4-player-totals-v2' ? 'Player Simulation v2' : 'Old score-only / legacy'}</td>
             <td className="nba-board-reference">{game.pregameLine ? <>
               <strong>{game.home} {game.pregameLine.homeSpread > 0 ? '+' : ''}{game.pregameLine.homeSpread}</strong>
               <span>{game.away} {game.pregameLine.awaySpread > 0 ? '+' : ''}{game.pregameLine.awaySpread}</span>

@@ -1,8 +1,9 @@
 import type { NbaFactor, NbaFactors, NbaPregameLine } from '../server/nba-factors'
-import { applyNbaSelectionPolicy, applyNbaPlayerSelectionPolicy, NBA_SELECTION_POLICY, NBA_PLAYER_SELECTION_POLICY } from '../server/nba-policy'
+import { applyNbaSelectionPolicy, applyNbaPlayerSelectionPolicy, applyNbaPlayerMarketsSelectionPolicy,
+  NBA_SELECTION_POLICY, NBA_PLAYER_SELECTION_POLICY, NBA_PLAYER_MARKETS_SELECTION_POLICY, type compareNbaPlayerMarkets } from '../server/nba-policy'
 import type { NbaChallengerResult } from '../server/nba-challenger'
 import type { NbaPlayerTotalsResult } from '../server/nba-player-totals'
-import { pricedNbaSide, type NbaBook, type NbaMarket, type compareNbaPlayerTotals } from '../server/nba-kalshi'
+import { isNbaBook, pricedNbaSide, validateNbaMarketForGame, type NbaBook, type NbaMarket, type compareNbaPlayerTotals } from '../server/nba-kalshi'
 
 export const NBA_FREEZE_KEY = 'edgeboard-nba-freezes-v1'
 export const NBA_REVIEW_KEY = 'edgeboard-nba-reviews-v1'
@@ -12,7 +13,11 @@ export type NbaEvidence = { requestedPaper: boolean; availabilitySource: string;
 export type NbaStudySide = { ticker: string; market: string; side: string; line: number | null; probability: number; price: number;
   feeEstimate: number; allInCost: number; estimatedNetEdge: number; rules: string; rulesSecondary: string }
 export type NbaScanGame = { gameId: string; home: string; away: string; startsAt: string;
-  playerTotals?: { simulation: NbaPlayerTotalsResult; comparison: ReturnType<typeof compareNbaPlayerTotals> } | null;
+  playerTotals?: { simulation: NbaPlayerTotalsResult; comparison: ReturnType<typeof compareNbaPlayerTotals>;
+    crossMarketShadow?: ReturnType<typeof compareNbaPlayerMarkets>;
+    marketComparison?: ReturnType<typeof applyNbaPlayerMarketsSelectionPolicy> & {
+      status: 'PAPER_ONLY_EXPERIMENT'; promotionGate: 'USER_APPROVED_PAPER_ONLY'; rankingRule: string } } | null;
+  marketInspection?: { mode: 'ALL_SUPPORTED_OPEN_MARKETS'; listed: number; inspected: number; complete: true };
   selectionPolicy?: string; abstentionReason?: string | null; baselineStudySide?: NbaStudySide | null;
   baselinePolicyStudySide?: NbaStudySide | null; legacySelection?: ReturnType<typeof applyNbaSelectionPolicy<NbaStudySide>>;
   challenger?: (NbaChallengerResult & { status: 'SHADOW_ONLY'; promotionGate?: 'REJECTED_HISTORICAL_EVALUATION'; studySide: NbaStudySide | null; candidates: NbaStudySide[];
@@ -55,6 +60,13 @@ const validUrl = (text: string) => {
   try { return new URL(text).protocol === 'https:' } catch { return false }
 }
 
+// Candidate fields are flat, but object property order is not evidence.
+const sameNbaSide = (actual: NbaStudySide | null | undefined, expected: NbaStudySide | null) =>
+  actual === expected || (!!actual && !!expected && Object.keys(actual).length === Object.keys(expected).length &&
+    Object.entries(expected).every(([key, value]) => actual[key as keyof NbaStudySide] === value))
+const sameNbaCandidates = (actual: NbaStudySide[] | undefined, expected: NbaStudySide[]) =>
+  Array.isArray(actual) && actual.length === expected.length && actual.every((side, i) => sameNbaSide(side, expected[i]))
+
 export function freezeNbaStudy(input: NbaScan, evidence: Record<string, NbaEvidence>, nowIso: string): NbaFreeze {
   const now = Date.parse(nowIso); const observed = Date.parse(input.observedAt)
   if (!/^20\d\d-\d\d-\d\d$/.test(input.date) || input.date < '2026-10-20' || input.date > '2027-04-11' ||
@@ -75,12 +87,59 @@ export function freezeNbaStudy(input: NbaScan, evidence: Record<string, NbaEvide
   if (input.games.some((g) => !Number.isFinite(Date.parse(g.startsAt)) || Date.parse(g.startsAt) <= now || g.qualifiedPaperPick !== false)) {
     throw new Error('Opening-game tip has passed or scan is malformed')
   }
+  if (input.games.some((game) => game.selectionPolicy === NBA_PLAYER_MARKETS_SELECTION_POLICY)) {
+    const inventory = input.marketInventory as NbaMarket[]
+    const games = new Set(input.games.map((game) => game.gameId))
+    if (inventory.some((market) => !market || typeof market.ticker !== 'string' || !market.ticker || !games.has(market.gameId)) ||
+      new Set(inventory.map((market) => market.ticker)).size !== inventory.length ||
+      input.games.some((game) => !game.home || !game.away || game.home === game.away) ||
+      new Set(input.games.map((game) => JSON.stringify([game.away, game.home]))).size !== input.games.length) {
+      throw new Error('NBA all-market inventory has duplicate tickers or invalid game mappings')
+    }
+  }
   const decisions: NbaDecision[] = input.games.map((game) => {
     const submitted = evidence[game.gameId] ?? null
     const reasons: string[] = []
     const side = game.studySide
     const playerPrimary = game.selectionPolicy === NBA_PLAYER_SELECTION_POLICY
-    if (game.selectionPolicy && game.selectionPolicy !== NBA_SELECTION_POLICY && !playerPrimary) throw new Error('Unknown NBA selection policy')
+    const playerMarketsPrimary = game.selectionPolicy === NBA_PLAYER_MARKETS_SELECTION_POLICY
+    if (game.selectionPolicy && game.selectionPolicy !== NBA_SELECTION_POLICY && !playerPrimary && !playerMarketsPrimary) throw new Error('Unknown NBA selection policy')
+    if (playerMarketsPrimary) {
+      const comparison = game.playerTotals?.marketComparison
+      const markets = (input.marketInventory as NbaMarket[]).filter((market) => market.gameId === game.gameId)
+      if (markets.some((market) => !validateNbaMarketForGame(market, { ...game, date: input.date }))) {
+        throw new Error('NBA all-market inventory mapping or contract rules do not reconcile with raw metadata')
+      }
+      const modelAt = Date.parse(game.playerTotals?.simulation.observedAt ?? '')
+      if (!Number.isFinite(modelAt) || modelAt > observed || now - modelAt > 30 * 60_000) {
+        throw new Error('NBA all-market model observation is stale or from the future')
+      }
+      const inspection = game.marketInspection
+      if (!Array.isArray(game.inspected) || game.inspected.length !== markets.length ||
+        new Set(game.inspected.map((item) => item.ticker)).size !== markets.length ||
+        game.inspected.some((item) => !markets.some((market) => market.ticker === item.ticker) ||
+          !isNbaBook(item.book)) ||
+        inspection?.mode !== 'ALL_SUPPORTED_OPEN_MARKETS' || inspection.complete !== true ||
+        inspection.listed !== markets.length || inspection.inspected !== game.inspected.length ||
+        (['moneyline', 'spread', 'total'] as const).some((kind) => game.coverage?.[kind] !== markets.filter((market) => market.kind === kind).length)) {
+        throw new Error('NBA all-market inspection, inventory coverage or raw book evidence is incomplete')
+      }
+      if (game.inspected.some((item) => !Number.isFinite(Date.parse(item.observedAt)) || Date.parse(item.observedAt) < listedAt ||
+        Date.parse(item.observedAt) > observed || now - Date.parse(item.observedAt) > 30 * 60_000)) {
+        throw new Error('NBA all-market book observation is stale or outside the listing-to-scan window')
+      }
+      const books = Object.fromEntries(game.inspected.map((item) => [item.ticker, item.book as NbaBook]))
+      const permitted = applyNbaPlayerMarketsSelectionPolicy(markets, books, game.playerTotals?.simulation, input.quantity)
+      if (!sameNbaSide(side, permitted.studySide) || !sameNbaCandidates(game.candidates, permitted.candidates) ||
+        game.abstentionReason !== permitted.abstentionReason || !comparison ||
+        comparison.selectionPolicy !== permitted.selectionPolicy || comparison.status !== 'PAPER_ONLY_EXPERIMENT' ||
+        comparison.promotionGate !== 'USER_APPROVED_PAPER_ONLY' ||
+        comparison.rankingRule !== 'net gap descending; ticker ASCII ascending; YES before NO' ||
+        comparison.abstentionReason !== permitted.abstentionReason ||
+        !sameNbaSide(comparison.studySide, permitted.studySide) || !sameNbaCandidates(comparison.candidates, permitted.candidates)) {
+        throw new Error('NBA all-market selection policy does not permit this primary pick or candidate evidence')
+      }
+    }
     if (playerPrimary) {
       const comparison = game.playerTotals?.comparison
       // Reconcile the complete inspected total subset, not merely the submitted winner.
@@ -139,7 +198,7 @@ export function freezeNbaStudy(input: NbaScan, evidence: Record<string, NbaEvide
       }
     }
     const challenger = game.shadowSide
-    const shadow = !playerPrimary && side && challenger && challenger.probability > side.probability &&
+    const shadow = !playerPrimary && !playerMarketsPrimary && side && challenger && challenger.probability > side.probability &&
       ['spread', 'moneyline'].includes(challenger.market) && challenger.probability >= .55 &&
       challenger.allInCost > 0 && challenger.allInCost <= 1 / 1.7 && challenger.estimatedNetEdge >= .03 &&
       challenger.rules && challenger.rulesSecondary &&
@@ -150,7 +209,7 @@ export function freezeNbaStudy(input: NbaScan, evidence: Record<string, NbaEvide
         Date.parse(item.observedAt) <= observed && now - Date.parse(item.observedAt) <= 30 * 60_000) ? challenger : null
     if (!side) reasons.push('No priced study side')
     else {
-      if (!playerPrimary && (!game.forecast || !['nba-scores-v1', 'nba-scores-v2'].includes(game.forecast.model))) reasons.push('Independent score forecast missing')
+      if (!playerPrimary && !playerMarketsPrimary && (!game.forecast || !['nba-scores-v1', 'nba-scores-v2'].includes(game.forecast.model))) reasons.push('Independent score forecast missing')
       if (!game.inspected?.some((book) => book.ticker === side.ticker && book.book &&
         Number.isFinite(Date.parse(book.observedAt)) && Date.parse(book.observedAt) >= listedAt &&
         Date.parse(book.observedAt) <= observed && now - Date.parse(book.observedAt) <= 30 * 60_000)) {
@@ -209,6 +268,8 @@ export function trackNbaPick(storage: Storage, scan: NbaScan, gameId: string, no
     ...(scan.modelEvidence ? { modelEvidence: scan.modelEvidence } : {}),
     status: scan.status, sources: scan.sources, series: scan.series,
     marketInventory: scan.marketInventory.filter((market) => {
+      // v5 revalidates every mapped book, including illiquid non-candidates.
+      if (game.selectionPolicy === NBA_PLAYER_MARKETS_SELECTION_POLICY) return (market as NbaMarket)?.gameId === gameId
       const ticker = (market as { ticker?: string })?.ticker
       return [game.studySide, game.shadowSide, game.baselineStudySide, ...(game.candidates ?? []),
         ...(game.challenger?.candidates ?? []), ...(game.playerTotals?.comparison.baselineCandidates ?? [])].some((candidate) => candidate?.ticker === ticker)

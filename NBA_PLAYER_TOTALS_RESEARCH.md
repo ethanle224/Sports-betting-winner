@@ -1,8 +1,8 @@
-# Player-totals forward research v2
+# Player Simulation v2 — v5 cross-market paper-primary research
 
 ## Purpose and boundary
 
-**Player Simulation v2 is the user-approved main NBA paper selector**, replacing the score-only model for new paper selections. The old model and its same-time quotes stay frozen for comparison; historical tickets are not rewritten. This is an uncalibrated, recent-rotation-conditional paper experiment, not a verified lineup forecast, neural-model fine-tune, demonstrated betting edge or live-trading policy. Select at most one eligible total per game by positive estimated post-cost gap; abstain on invalid inputs or no positive gap. There is no fallback to the old model, no forced total, no real order capability and no scheduled operation.
+**Player Simulation v2 is the user-approved main NBA paper selector across all supported full-game moneyline, spread and total markets**, under `nba-primary-v5-player-markets-v2` (v5). Status is `PAPER_ONLY_EXPERIMENT`; the gate is `USER_APPROVED_PAPER_ONLY`. This is an **UNCALIBRATED**, recent-rotation-conditional paper experiment, not a verified lineup forecast, calibrated odds, neural-model fine-tune, demonstrated betting edge or live-trading policy. Select at most one eligible positive estimated post-cost-gap side per game. Abstain on invalid inputs, unsupported or unquoted markets, or no positive gap. There is no fallback to the old model, no forced market choice, no real order capability and no scheduled operation. The old score-only selection and old totals-only comparator remain comparison evidence, not competing v5 main choices. Historical tickets and immutable artifacts are not rewritten.
 
 ## Inputs and reproducibility
 
@@ -16,20 +16,26 @@
 - Parse signed player `+/-` and reconcile a complete team column to five times the final score margin. Preserve missing values as unknown. Historical `+/-`, assists, steals, blocks, fouls, rebound context and team paint are recorded without independent score bonuses. A box-score `+/-` cannot identify a player's individual points allowed or causal on/off impact; it does not alter scores or the random seed.
 - **Player paint attempts remain unknown. All 2PA are not paint.** Injuries, confirmed starters, trades and minutes restrictions are not inferred from old box scores. The simulation remains conditional on recent historical rotations, not a verified forecast of today's lineup. The app's venue, rest, H2H and injury notes are separate context, not hidden numerical adjustments. This is not an "all factors" model.
 - Exactly 1,000 trials when the required inputs are valid. Store seed, input summaries/rotations, source URLs, observation/cutoff, simulated scores/totals and model version in the scan. For identical inputs the run is reproducible. Simulation error is not model uncertainty; 1,000 runs do not create 1,000 independent outcome observations.
-- Compare only the already inspected baseline total-contract/quote subset. Do not read extra favorable lines for the challenger or feed it market probabilities. Preserve costs/rules exactly. Candidate probabilities are conditional simulation estimates, not calibrated truth.
+- Every pregame v5 scan reads all mapped supported open moneyline, spread and total order books, rather than a top-N or near-reference shortlist. `marketInspection` records `mode: ALL_SUPPORTED_OPEN_MARKETS`, listed/inspected counts and `complete: true`. This completeness claim covers supported mapped markets, not every exchange product. Unsupported props, first-half/other period markets and integer/push contracts remain excluded; absent or unfillable YES/NO quotes are not fabricated.
+- Estimate each supported contract outcome directly from the **same paired home/away score draws**: final winner for moneyline, signed score margin against the spread, and combined points against the total. These market-specific frequencies are conditional simulation estimates, not calibrated odds. No market probability feeds the score simulation.
+- Price every executable supported YES/NO side at the requested size, preserving sized quotes, fee estimates, all-in costs and exact rules. Rank by **net gap descending; ticker ASCII ascending; YES before NO**, where net gap is the estimated payout probability minus estimated all-in per-contract cost. Chance rank is distinct from gap rank; alternatives and complementary sides are displayed even when their gap is nonpositive. Only a valid positive-gap leader can be the one main paper selection.
+- `game.candidates` and `game.studySide` are the v5 cross-market primary result; `playerTotals.marketComparison` records that v5 policy, candidates, selection/abstention, paper-only status/gate and ranking rule. The preserved `playerTotals.comparison` is the old totals-only comparator. Never substitute it for a missing v5 choice or relabel a prior bounded `crossMarketShadow` as v5 primary evidence. For model comparisons, use the same captured contract/quote subset and explicitly report coverage differences.
 
 ## Freeze before outcomes
 
-The one-shot `capture:nba` artifact stores the complete scan and code SHA-256 values. It performs no tracker/DB/order writes. Keep the first valid pre-tip observation per game/model for evaluation; preserve later rescans separately, never pick the version that eventually won. Clicking Track in the app saves the main v2 choice with its simulation and old-model comparison in one immutable paper record. The baseline does not create a second tracked pick. Previously frozen v3/legacy records retain their original policy and selections.
+The one-shot `capture:nba` artifact stores the complete scan and code SHA-256 values, including `server/nba-market-books.ts`, the policy/simulation/quote implementations, calibration data and `vercel.json`. It performs no tracker/DB/order writes. Captures use append-only, exclusive file creation. Keep the first valid pre-tip observation per game/policy for evaluation; preserve later rescans separately, never pick the version that eventually won. Clicking Track in the app saves the v5 choice with its simulation and old-model comparison in one immutable paper record. Comparison models do not create extra tracked picks. Previously frozen v3, v4 and legacy records retain their original policies and selections.
 
-The active model emits `nba-player-totals-v2`, selected under `nba-primary-v4-player-totals-v2`. Forward artifact schema v5 records explicit user approval for the paper selector, model/policy versions and code hashes. Earlier `nba-player-totals-shadow-v1` and `nba-player-totals-shadow-v2` artifacts remain separate, not relabeled as main-model picks. The UI reports paired team score means, total median and central 80% simulation range, plus simulated home-win frequency; those ranges describe model draws, not calibrated real-game confidence. Highest simulated payout probability is displayed separately from largest estimated after-cost gap on the same inspected quote subset.
+The score simulation version remains **`nba-player-totals-v2`**; the active cross-market policy is **`nba-primary-v5-player-markets-v2`**. New forward artifacts have **schema v6** and research protocol **`nba-player-markets-forward-v4`**, recording explicit user approval, all-supported-market scope, paper-only status/gate, deterministic ranking, model/policy versions and code hashes. Capture fails closed on missing, legacy or mixed game policies instead of labeling them a v5 cohort. Earlier schema-v5/v4 totals-only policy data (`nba-primary-v4-player-totals-v2`) and `nba-player-totals-shadow-v1`/`nba-player-totals-shadow-v2` artifacts remain separate and unchanged. The history UI labels v5 as `Player Simulation v2 · v5 cross-market`, distinct from the v4 totals-only cohort.
+
+The UI reports paired team score means, total median and central 80% simulation range, plus simulated home-win frequency; those ranges describe model draws, not calibrated real-game confidence. V5 displays all quoted YES/NO candidates with uncalibrated chance, estimated fee, all-in cost and net gap, ordered across market types. Highest simulated payout probability is displayed separately from largest estimated after-cost gap. Missing inputs, empty supported markets and nonpositive gaps are explicit abstentions, not totals-only fallback choices.
 
 For analysis keep these cohorts distinct:
 
-1. Main v2 paper decisions, including abstentions under the active policy.
+1. Main **v5 cross-market** paper decisions, including abstentions under the active policy.
 2. Old score-only model's same-time selection, retained for comparison only.
-3. Baseline top positive-gap total per game on the same inspected subset.
-4. Standalone historical total-study cards, if present, reported separately.
+3. Old totals-only comparator on the captured scan; it does not choose the v5 main side.
+4. Historical **v4 totals-only main** paper records, retained under their original policy.
+5. Standalone historical total-study cards and prior shadow records, reported separately.
 
 Freeze every candidate's probability **and** estimated net gap. Highest probability, largest estimated gap, and selected baseline pick can differ. Do not select a probability/edge cutoff after viewing wins. Alternative lines, complementary sides and repeat scans are correlated observations, not additional independent games.
 
@@ -40,11 +46,13 @@ Manual review only; no cron and no automatic promotion.
 - Report eligible games, unknown/missing inputs, settled/pending/fair-price outcomes and abstentions.
 - For each cohort, report W/L and net units after estimated entry costs using the existing 1u stake convention. Never count a hypothetical quote as an actual fill.
 - Compare baseline/player probability on the **same contract** against final settlement (Brier/calibration), and each model's frozen one-per-game choice. Report sportsbook/executable-price benchmarks where frozen, not reconstructed closing data.
-- Inspect probability-ranked versus gap-ranked totals, but cluster alternative-contract comparisons by game and report exact sample sizes. A high-probability pick can win often and still lose units when overpriced.
+- Inspect probability-ranked versus gap-ranked cross-market candidates, but cluster alternative-contract comparisons by game and report exact sample sizes. A high-probability pick can win often and still lose units when overpriced.
 - Diagnose whether apparent improvement comes from projection quality, selection, price, small sample, or differing coverage. Do not tune on this checkpoint and describe that same sample as validation.
-- The user explicitly approved v2 as the main paper selector; that approval is not statistical validation. A continued totals trend is a reason for another forward comparison, **not proof of profitability**. If evidence remains sparse or contradictory, report it honestly. Further policy changes or retirement of the comparison model require explicit approval.
+- The user explicitly approved v2 under v5 as the cross-market main paper selector; that approval is not statistical validation. Neither prior totals results nor a cross-market trend validates this new cohort or establishes profitability. If evidence remains sparse or contradictory, report it honestly. Further policy changes or retirement of the comparison model require explicit approval.
 
 ## Historical caution
+
+The following audits and release checks describe earlier totals-only/shadow policies, not v5 cross-market results. No new v5 performance claim follows from them.
 
 Prior immutable primary-ledger totals and standalone total-study cards are different populations. Historical winning totals alone do not establish that the highest estimated totals rank wins more reliably. A rank/outcome audit must use original frozen pregame estimates and trustworthy settlements; absent evidence remains unknown.
 
@@ -69,7 +77,7 @@ The bounded October 28 audit checked 464 frozen candidate-side values against th
 - A second live scan at `2026-10-28T16:52:37.970Z` reproduced all eight seeds and all 8,000 paired score/total draws exactly; all captured code hashes still match. Quote changes do not select a new random seed. Unknown cases also remained unknown.
 - These are software/data-coverage checks, not settled forward performance. No profitability, calibration improvement or verified current-lineup adjustment is established.
 
-## Main-v2 release verification — October 28, 2026
+## Historical totals-only main-v2 (v4 policy) release verification — October 28, 2026
 
 - Full stable-source gates: **419 tests passed, 4 skipped**, plus lint, browser/server typecheck, production build, whitespace check and NodeNext compile of both NBA routes. `npm audit` reports zero known vulnerabilities. The built local page responds HTTP 200 with the current release bundle.
 - Final read-only main-selector capture: **12 games, 8 v2 main paper choices, 4 abstentions, 8,000 paired simulated games, 84 same-quote total sides**. All 12 old-model choices remain captured for comparison. V2 choices are totals only; unavailable or invalid model evidence does not fall back to an old-model pick.
